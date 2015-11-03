@@ -2,10 +2,12 @@
 
 
 from .samplerbase import SamplerBase
-from .collapsed import (CollapsedGibbsSampler, CollapsedSplitMergeSampler,
-        CollapsedSAMSSampler)
+from .collapsed import (CollapsedSampler, CollapsedGibbsSampler,
+        CollapsedMSSampler, CollapsedRGMSSampler, CollapsedSAMSSampler)
 
 __all__ = ["SamplerBase",
+           "CollapsedSampler",
            "CollapsedGibbsSampler",
-           "CollapsedSplitMergeSampler",
-           "CollapsedSAMSSampler"]
+           "CollapsedMSSampler",
+           "CollapsedRGMSSampler",
+           "CollapsedSAMSSampler",]
