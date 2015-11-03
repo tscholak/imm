@@ -62,16 +62,7 @@ class CollapsedGibbsSampler(SamplerBase):
 
             # Calculate the likelihoods
             for k in active_components:
-                try:
-                    log_dist[k] += mm.log_likelihood(x_n[i], params[k])
-                except Exception as e:
-                    print x_n[i]
-                    print params[k].rho_c
-                    print params[k].beta_c
-                    print params[k].xsum_c
-                    print params[k].xi_c
-                    print params[k].beta_W_chol_c
-                    raise e
+                log_dist[k] += mm.log_likelihood(x_n[i], params[k])
 
             # Sample from log_dist. Normalization is not required
             # TODO: Find a better way to sample
