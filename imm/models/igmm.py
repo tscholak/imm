@@ -14,24 +14,35 @@ class CDPGMM(MMBase):
 
     Parameters
     ----------
-    alpha: float
+    alpha : None or float, optional
         alpha prior
-    xi: array-like
+    a: None or float, optional
+        shape for alpha hyperprior
+    b: None or float, optional
+        scale for alpha hyperprior
+    xi : None or array-like, optional
         xi prior
-    rho: float
+    rho : None or float, optional
         rho prior
-    beta: float
+    beta : None or float, optional
         beta prior
-    W: array-like
+    W : None or array-like, optional
         W prior
-    random state: None or int or np.random.RandomState instance, optional
+    random_state : None or int or np.random.RandomState instance, optional
         If int or RandomState, use it for drawing the random variates.
         If None (or np.random), the global np.random state is used.
         Default is None.
     """
 
     @staticmethod
-    def _process_parameters(dim, alpha, xi, rho, beta, W):
+    def _sample_alpha(a, b, random_state):
+
+        return random_state.gamma(a, b)
+
+    @classmethod
+    def _process_parameters(cls, dim, alpha, a, b, xi, rho, beta, W,
+            random_state):
+
         # Try to infer dimensionality
         if dim is None:
             if xi is None:
@@ -102,25 +113,43 @@ class CDPGMM(MMBase):
             raise ValueError("Float 'beta' must be larger than the dimension"
                              " minus one, but beta = %f" % beta)
 
+        if a is not None:
+            if not np.isscalar(a):
+                raise ValueError("Float 'a' must be a scalar.")
+            elif a <= 0.0:
+                raise ValueError("Float 'a' must be larger than zero, but"
+                                 " a = %f" % a)
+
+        if b is not None:
+            if not np.isscalar(b):
+                raise ValueError("Float 'b' must be a scalar.")
+            elif b <= 0.0:
+                raise ValueError("Float 'b' must be larger than zero, but"
+                                 " b = %f" % b)
+
         if alpha is None:
-            alpha = 1.0
+            if a is not None and b is not None:
+                alpha = cls._sample_alpha(a, b, random_state)
+            else:
+                alpha = 1.0
         elif not np.isscalar(alpha):
             raise ValueError("Float 'alpha' must be a scalar.")
         elif alpha <= 0.0:
             raise ValueError("Float 'alpha' must be larger than zero, but"
                              " alpha = %f" % alpha)
 
-        return dim, alpha, xi, rho, beta, W
+        return dim, alpha, a, b, xi, rho, beta, W
 
-    def __init__(self, alpha=1.0, xi=None, rho=1.0, beta=1.0, W=1.0,
-            sampler=None, seed=None):
+    def __init__(self, alpha=1.0, a=None, b=None, xi=None, rho=1.0, beta=1.0,
+            W=1.0, sampler=None, seed=None):
         from ..samplers import CollapsedGibbsSampler
         self.default_sampler = CollapsedGibbsSampler
 
         super(CDPGMM, self).__init__(sampler, seed)
 
-        self.dim, self.alpha, self.xi, self.rho, self.beta, self.W = \
-                self._process_parameters(None, alpha, xi, rho, beta, W)
+        self.dim, self.alpha, self.a, self.b, self.xi, self.rho, self.beta, \
+                self.W = self._process_parameters(None, alpha, a, b, xi, rho,
+                        beta, W, self._random_state)
 
         self.beta_W_chol = cholesky(self.beta*self.W, lower=True)
 

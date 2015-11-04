@@ -15,7 +15,7 @@ from ..models import CDPGMM
 class CollapsedSampler(SamplerBase):
     """
     Class which encapsulates common functionality between all collapsed
-    samplers.
+    samplers for the Dirichlet process mixture model.
     """
 
     compatible_mixture_models = set()
@@ -42,6 +42,8 @@ class CollapsedSampler(SamplerBase):
         mm = self.mixture_model
 
         random_state = mm._get_random_state(random_state)
+
+        alpha = mm.alpha
 
         n, x_n = self._process_examples(x_n)
 
@@ -73,15 +75,16 @@ class CollapsedSampler(SamplerBase):
                 params[k].update(x_n[i])
 
         for itn in range(self.max_iter):
-            self._inference_step(n, x_n, c_n, inv_c, n_c, params,
-                    active_components, inactive_components, random_state)
+            alpha = self._inference_step(alpha, n, x_n, c_n, inv_c, n_c,
+                    params, active_components, inactive_components,
+                    random_state)
 
         return c_n
 
 
 class CollapsedGibbsSampler(CollapsedSampler):
     """
-    Collapsed Gibbs sampler for Dirichlet process mixture model.
+    Collapsed Gibbs sampler for the Dirichlet process mixture model.
 
     Methods
     -------
@@ -100,7 +103,30 @@ class CollapsedGibbsSampler(CollapsedSampler):
 
     compatible_mixture_models = set([CDPGMM])
 
-    def _algorithm_3_iteration(self, n, x_n, c_n, inv_c, n_c, params,
+    def _alpha_iteration(self, alpha, n, active_components, random_state):
+        """
+        Sample a new value for alpha.
+        """
+
+        mm = self.mixture_model
+
+        if mm.a and mm.b:
+
+            k = len(active_components)
+
+            x = random_state.beta(alpha + 1.0, n)
+
+            shape = mm.a + k - 1.0
+            scale = mm.b - np.log(x)
+
+            pi_x = shape / (shape + n * scale)
+
+            alpha = pi_x * random_state.gamma(mm.a + k, scale)
+            alpha += (1 - pi_x) * random_state.gamma(shape, scale)
+
+        return alpha
+
+    def _algorithm_3_iteration(self, alpha, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
         """
         Performs a single iteration of Radford Neal's Algorithm 3, see Neal
@@ -139,7 +165,7 @@ class CollapsedGibbsSampler(CollapsedSampler):
             active_components.add(prop_k)
             # Since prop_k is a new component, its conditional prior is
             # proportional to alpha
-            log_dist[prop_k] = np.log(mm.alpha)
+            log_dist[prop_k] = np.log(alpha)
 
             # Calculate the likelihoods
             for k in active_components:
@@ -168,11 +194,16 @@ class CollapsedGibbsSampler(CollapsedSampler):
                 active_components.remove(prop_k)
                 inactive_components.add(prop_k)
 
-    def _inference_step(self, n, x_n, c_n, inv_c, n_c, params,
+    def _inference_step(self, alpha, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
 
-        self._algorithm_3_iteration(n, x_n, c_n, inv_c, n_c, params,
+        self._algorithm_3_iteration(alpha, n, x_n, c_n, inv_c, n_c, params,
                 active_components, inactive_components, random_state)
+
+        alpha = self._alpha_iteration(alpha, n, active_components,
+                random_state)
+
+        return alpha
 
 
 class CollapsedMSSampler(CollapsedGibbsSampler):
@@ -263,15 +294,16 @@ class CollapsedMSSampler(CollapsedGibbsSampler):
         return llq
 
     @classmethod
-    def _attempt_split(cls, mm, x_n, c_n, inv_c, n_c, params, acc, launch_i,
-            launch_j, active_components, inactive_components, random_state):
+    def _attempt_split(cls, alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
+            launch_i, launch_j, active_components, inactive_components,
+            random_state):
         # The probability q that the split proposal will be produced from the
         # launch state is in the denominator of the MH acceptance probability,
         # thus
         acc *= -1.0
 
         # Logarithm of prior quotient, see Eq. (3.4) in Jain & Neal (2004)
-        acc += np.log(mm.alpha)
+        acc += np.log(alpha)
         acc -= gammaln(n_c[launch_j.c])
         acc += gammaln(launch_i.n_c)
         acc += gammaln(launch_j.n_c)
@@ -311,8 +343,9 @@ class CollapsedMSSampler(CollapsedGibbsSampler):
             inactive_components.add(launch_i.c)
 
     @classmethod
-    def _attempt_merge(cls, mm, x_n, c_n, inv_c, n_c, params, acc, launch_i,
-            launch_j, active_components, inactive_components, random_state):
+    def _attempt_merge(cls, alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
+            launch_i, launch_j, active_components, inactive_components,
+            random_state):
         # Here we finalize the merge proposal by adding all those examples
         # that so far have been assigned to component launch_i.c = c_n[i] to
         # component launch_j.c = c_n[j]. Note that the remaining examples in S
@@ -328,7 +361,7 @@ class CollapsedMSSampler(CollapsedGibbsSampler):
             launch_j.update(l, x_n[l])
 
         # Logarithm of prior quotient, see Eq. (3.5) in Jain & Neal (2004)
-        acc -= np.log(mm.alpha)
+        acc -= np.log(alpha)
         acc -= gammaln(n_c[launch_i.c])
         acc -= gammaln(n_c[launch_j.c])
         acc += gammaln(launch_j.n_c)
@@ -560,8 +593,8 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
 
         return acc
 
-    def _conjugate_split_merge_iteration(n, x_n, c_n, inv_c, n_c, params,
-            active_components, inactive_components, random_state):
+    def _conjugate_split_merge_iteration(alpha, n, x_n, c_n, inv_c, n_c,
+            params, active_components, inactive_components, random_state):
         """
         Performs a single iteration of the Split-Merge MCMC procedure for the
         conjugate Dirichlet process mixture model, see Jain & Neal (2004).
@@ -582,27 +615,35 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
         # If i and j are in the same mixture component, then we attempt to
         # split
         if c_n[i] == c_n[j]:
-            self._attempt_split(mm, x_n, c_n, inv_c, n_c, params, acc,
+            self._attempt_split(alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
                     launch_i, launch_j, active_components,
                     inactive_components, random_state)
         # Otherwise, if i and j are in different mixture components, then we
         # attempt to merge
         else:
-            self._attempt_merge(mm, x_n, c_n, inv_c, n_c, params, acc,
+            self._attempt_merge(alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
                     launch_i, launch_j, active_components,
                     inactive_components, random_state)
 
-    def _inference_step(self, n, x_n, c_n, inv_c, n_c, params,
+    def _inference_step(self, alpha, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
 
         for _ in range(self.max_split_merge_moves):
-            self._conjugate_split_merge_iteration(n, x_n, c_n, inv_c, n_c,
-                    params, active_components, inactive_components,
+
+            self._conjugate_split_merge_iteration(alpha, n, x_n, c_n, inv_c,
+                    n_c, params, active_components, inactive_components,
                     random_state)
 
         for _ in range(self.max_Gibbs_scans):
-            self._algorithm_3_iteration(n, x_n, c_n, inv_c, n_c, params,
-                    active_components, inactive_components, random_state)
+
+            self._algorithm_3_iteration(alpha, n, x_n, c_n, inv_c, n_c,
+                    params, active_components, inactive_components,
+                    random_state)
+
+            alpha = self._alpha_iteration(alpha, n, active_components,
+                    random_state)
+
+        return alpha
 
 
 class CollapsedSAMSSampler(CollapsedMSSampler):
@@ -695,21 +736,26 @@ class CollapsedSAMSSampler(CollapsedMSSampler):
         # If i and j are in the same mixture component, then we attempt to
         # split
         if c_n[i] == c_n[j]:
-            self._attempt_split(mm, x_n, c_n, inv_c, n_c, params, acc,
+            self._attempt_split(alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
                     launch_i, launch_j, active_components,
                     inactive_components, random_state)
         # Otherwise, if i and j are in different mixture components, then we
         # attempt to merge
         else:
-            self._attempt_merge(mm, x_n, c_n, inv_c, n_c, params, acc,
+            self._attempt_merge(alpha, mm, x_n, c_n, inv_c, n_c, params, acc,
                     launch_i, launch_j, active_components,
                     inactive_components, random_state)
 
     def _inference_step(self, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
 
-        self._sams_iteration(n, x_n, c_n, inv_c, n_c, params,
+        self._sams_iteration(alpha, n, x_n, c_n, inv_c, n_c, params,
                 active_components, inactive_components, random_state)
 
-        self._algorithm_3_iteration(n, x_n, c_n, inv_c, n_c, params,
+        self._algorithm_3_iteration(alpha, n, x_n, c_n, inv_c, n_c, params,
                 active_components, inactive_components, random_state)
+
+        alpha = self._alpha_iteration(alpha, n, active_components,
+                random_state)
+
+        return alpha
