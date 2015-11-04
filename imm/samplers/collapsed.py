@@ -517,7 +517,7 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
         return launch_i, launch_j
 
     @staticmethod
-    def _restricted_gibbs_scans(mm, x_n, c_n, S, launch_i, launch_j,
+    def _restricted_gibbs_scans(mm, x_n, c_n, i, j, S, launch_i, launch_j,
             max_intermediate_scans, random_state):
         """
         Modify the initial launch state by performing max_intermediate_scans
@@ -593,7 +593,7 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
 
         return acc
 
-    def _conjugate_split_merge_iteration(alpha, n, x_n, c_n, inv_c, n_c,
+    def _conjugate_split_merge_iteration(self, alpha, n, x_n, c_n, inv_c, n_c,
             params, active_components, inactive_components, random_state):
         """
         Performs a single iteration of the Split-Merge MCMC procedure for the
@@ -609,7 +609,7 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
         launch_i, launch_j = self._init_launch_state(mm, x_n, c_n, i, j, S,
                 active_components, inactive_components, random_state)
 
-        acc = self._restricted_gibbs_scans(mm, x_n, c_n, S, launch_i,
+        acc = self._restricted_gibbs_scans(mm, x_n, c_n, i, j, S, launch_i,
                 launch_j, self.max_intermediate_scans, random_state)
 
         # If i and j are in the same mixture component, then we attempt to
@@ -716,7 +716,7 @@ class CollapsedSAMSSampler(CollapsedMSSampler):
 
         return launch_i, launch_j, acc
 
-    def _sams_iteration(self, n, x_n, c_n, inv_c, n_c, params,
+    def _sams_iteration(self, alpha, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
         """
         Performs a single iteration of the Sequentially-Allocated Merge-Split
@@ -746,7 +746,7 @@ class CollapsedSAMSSampler(CollapsedMSSampler):
                     launch_i, launch_j, active_components,
                     inactive_components, random_state)
 
-    def _inference_step(self, n, x_n, c_n, inv_c, n_c, params,
+    def _inference_step(self, alpha, n, x_n, c_n, inv_c, n_c, params,
             active_components, inactive_components, random_state):
 
         self._sams_iteration(alpha, n, x_n, c_n, inv_c, n_c, params,

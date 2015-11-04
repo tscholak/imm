@@ -16,9 +16,9 @@ class CDPGMM(MMBase):
     ----------
     alpha : None or float, optional
         alpha prior
-    a: None or float, optional
+    a : None or float, optional
         shape for alpha hyperprior
-    b: None or float, optional
+    b : None or float, optional
         scale for alpha hyperprior
     xi : None or array-like, optional
         xi prior
