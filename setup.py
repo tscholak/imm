@@ -5,10 +5,10 @@ import codecs
 import os
 
 try:
-    from setuptools import setup
+    from setuptools import setup, find_packages
     from setuptools import Extension
 except ImportError:
-    from distutils.core import setup
+    from distutils.core import setup, find_packages
     from distutils.extension import Extension
 
 here = os.path.abspath(os.path.dirname(__file__))
@@ -43,7 +43,7 @@ if __name__ == '__main__':
           url='https://github.com/tscholak/imm',
           author='Torsten Scholak',
           author_email='torsten.scholak@googlemail.com',
-          packages=['imm'],
+          packages=find_packages(),
           platforms=['Any'],
           install_requires=install_requires,
           ext_modules=ext_modules,)
