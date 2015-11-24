@@ -3,6 +3,4 @@
 from . import samplers
 from . import models
 
-__all__ = ["samplers", "models"]
-
-__version__ = "0.3"
+__version__ = "0.4"
