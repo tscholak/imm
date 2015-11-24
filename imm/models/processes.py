@@ -363,56 +363,6 @@ class DP(GenericProcess):
 
             return gammaln(nc)
 
-    def draw_poop(self, size=1, random_state=None):
-
-        #pm = self._process_model
-        mm = self._mixture_model
-
-        n, m, shape = self._process_size(size)
-
-        random_state = self._get_random_state(random_state)
-
-        # Maximum number of components is number of examples
-        c_max = n
-
-        # Array of vectors of component indicator variables
-        c_n = np.zeros(m*n, dtype=int).reshape((shape+(n,)))
-
-        # Array of examples
-        # TODO: Make this truly model-agnostic, i.e. get rid of mm.dim and
-        #       dtype=float
-        x_n = np.zeros((m*n*mm.dim), dtype=float).reshape((shape+(n,mm.dim)))
-
-        for index in np.ndindex(shape):
-            #process_param = pm.DrawParam(pm, random_state)
-
-            # Lazily instantiate the components
-            mixture_params = [mm.DrawParam(mm, random_state)
-                    for _ in range(c_max)]
-
-            for i in range(n):
-                # Draw a component k for example i from the Chinese restaurant
-                # process with concentration parameter alpha
-                # TODO: Make process-agnostic and move method to generic
-                #       process class!
-                dist = np.bincount(c_n[index]).astype(float)
-                dist[0] = self.alpha
-
-                # TODO: Define a scipy-style categorical distribution object
-                #       and sample from it!
-                cdf = np.cumsum(dist)
-                r = random_state.uniform(size=1) * cdf[-1]
-                [k] = cdf.searchsorted(r)
-                k = len(dist) if k == 0 else k
-                c_n[index+(i,)] = k
-
-                # New components are instantiated automatically when needed
-                x_n[index+(i,)] = mixture_params[k-1].draw_x_n()
-
-        c_n = c_n - 1
-
-        return _squeeze_output(x_n), _squeeze_output(c_n)
-
 
 class MFM(GenericProcess):
     """
