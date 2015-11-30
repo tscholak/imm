@@ -5,7 +5,6 @@ Collapsed samplers.
 """
 
 import numpy as np
-from scipy.special import gammaln
 from collections import defaultdict
 
 from .generic import GenericSampler
@@ -16,7 +15,8 @@ from ..models import DP, MFM
 class CollapsedSampler(GenericSampler):
     """
     Class which encapsulates common functionality between all collapsed
-    samplers.
+    samplers. The Markov chain for these samplers consists only of class
+    indicators c_n on a discrete state space.
     """
 
     compatible_process_models = set()
@@ -31,16 +31,20 @@ class CollapsedSampler(GenericSampler):
         ----------
         x_n : array-like
             Examples
-        c_n : array-like
+        c_n : None or array-like
             Vector of component indicator variables. If None, then the
             examples will be assigned to the same component initially
-        random_state : np.random.RandomState instance
+        max_iter : None or int, optional
+            The maximum number of iterations
+        warmup: None or int, optional
+            The number of warm-up iterations
+        random_state : np.random.RandomState instance, optional
             Used for drawing the random variates
 
         Returns
         -------
         c_n : ndarray
-            Inferred component vector
+            Inferred component vectors
         """
 
         max_iter = self._get_max_iter(max_iter)
@@ -55,7 +59,7 @@ class CollapsedSampler(GenericSampler):
 
         c_n = self._check_components(n, c_n)
 
-        # Maximum number of components is number of examples
+        # Maximum number of components
         c_max = n
 
         # Inverse mapping from components to examples
@@ -104,90 +108,34 @@ class CollapsedGibbsSampler(CollapsedSampler):
 
     Methods
     -------
-    ``inference(x_n, c_n, random_state)``
+    ``infer(x_n, c_n, max_iter, warmup, random_state)``
         Component inference.
 
     Parameters
     ----------
     process_model : compatible GenericProcess instance
         Compatible process model
-    max_iter : int
+    max_iter : None or int, optional
         The maximum number of iterations. The algorithm will be terminated
         once this many iterations have elapsed. This must be greater than 0.
         Default is 1000
+    warmup : None or int, optional
+        The number of warm-up iterations. The algorithm will discard the
+        results of all iterations until this many iterations have elapsed.
+        This must be non-negative and smaller than max_iter. Default is
+        max_iter / 2
     """
 
     compatible_process_models = set([DP, MFM])
 
     compatible_mixture_models = set([ConjugateGaussianMixture])
 
-    def _algorithm_3_iterate(self, n, x_n, c_n, inv_c, n_c,
-            active_components, inactive_components, process_param,
-            mixture_params, random_state):
-        """
-        Performs a single iteration of Radford Neal's Algorithm 3, see Neal
-        (2000).
-        """
-
-        for i in range(n):
-            prev_k = c_n[i]
-
-            # Bookkeeping. Note that Neal's Algorithm 3 doesn't need inv_c to
-            # work. It is used only in the split & merge algorithms
-            if inv_c is not None:
-                inv_c[prev_k].remove(i)
-
-            # Downdate component counter
-            n_c[prev_k] -= 1
-
-            # Downdate model-dependent parameters
-            mixture_params[prev_k].downdate(x_n[i])
-
-            # If the previous component is empty after example i is removed,
-            # recycle it and propose it as new component. If it is not empty,
-            # we need to get a new component from the inactive_components set
-            prop_k = prev_k if n_c[prev_k] == 0 else inactive_components.pop()
-            # If prop_k is already marked as active, the following won't have
-            # any effect
-            active_components.add(prop_k)
-
-            # Initialize and populate the total log probability accumulator
-            log_dist = np.empty(len(n_c), dtype=float)
-            log_dist.fill(-np.inf)
-            for k in active_components:
-                # Calculate the process prior and mixture likelihood
-                log_dist[k] = process_param.log_prior(n, n_c[k]) + \
-                        mixture_params[k].log_likelihood(x_n[i])
-
-            # Sample from log_dist. Normalization is not required
-            # TODO: Find a better way to sample
-            cdf = np.cumsum(np.exp(log_dist - log_dist.max()))
-            r = random_state.uniform(size=1) * cdf[-1]
-            [next_k] = cdf.searchsorted(r)
-
-            c_n[i] = next_k
-
-            # More bookkeeping
-            if inv_c is not None:
-                inv_c[next_k].add(i)
-
-            # Update component counter
-            n_c[next_k] += 1
-
-            # Update model-dependent parameters
-            mixture_params[next_k].update(x_n[i])
-
-            # Cleanup
-            if next_k != prop_k:
-                active_components.remove(prop_k)
-                inactive_components.add(prop_k)
-
     def _inference_step(self, n, x_n, c_n, inv_c, n_c, active_components,
             inactive_components, process_param, mixture_params, random_state):
 
-        self._algorithm_3_iterate(n, x_n, c_n, inv_c, n_c,
-                active_components, inactive_components, process_param,
-                mixture_params, random_state)
+        self._gibbs_iterate(n, x_n, c_n, inv_c, n_c, active_components,
+                inactive_components, process_param, mixture_params, 1,
+                random_state)
 
         process_param.iterate(n, len(active_components))
 
@@ -400,18 +348,23 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
 
     Methods
     -------
-    ``inference(x_n, c_n, random_state)``
+    ``infer(x_n, c_n, max_iter, warmup, random_state)``
         Component inference.
 
     Parameters
     ----------
-    mixture_model : compatible MMBase instance
-        Compatible mixture model
-    max_iter : int
+    process_model : compatible GenericProcess instance
+        Compatible process model
+    max_iter : None or int, optional
         The maximum number of iterations. The algorithm will be terminated
         once this many iterations have elapsed. This must be greater than 0.
         Default is 1000
-    scheme : array-like
+    warmup : None or int, optional
+        The number of warm-up iterations. The algorithm will discard the
+        results of all iterations until this many iterations have elapsed.
+        This must be non-negative and smaller than max_iter. Default is
+        max_iter / 2
+    scheme : None or array-like, optional
         Computation scheme. Default is (5,1,1): 5 intermediate scans to reach
         the split launch state, 1 split-merge move per iteration, and 1
         incremental Gibbs scan per iteration
@@ -469,10 +422,11 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
 
         return max_intermediate_scans, max_split_merge_moves, max_gibbs_scans
 
-    def __init__(self, process_model, max_iter=None, scheme=None):
+    def __init__(self, process_model, max_iter=1000, warmup=None,
+            scheme=None):
 
         super(CollapsedRGMSSampler, self).__init__(
-                process_model, max_iter)
+                process_model, max_iter, warmup)
 
         self.max_intermediate_scans, self.max_split_merge_moves, \
                 self.max_gibbs_scans = self._check_scheme(scheme)
@@ -546,8 +500,8 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
                 for index, launch in enumerate([launch_i, launch_j]):
                     # launch.n_c must never be zero!
                     # TODO: Make sure of that?
-                    log_dist[index] = process_param.log_prior(n, launch.n_c) \
-                            + launch.mixture_param.log_likelihood(x_n[l])
+                    log_dist[index] = process_param.log_prior(n, launch.n_c,
+                            1) + launch.mixture_param.log_likelihood(x_n[l])
 
                 # Normalization
                 log_dist_max = log_dist.max()
@@ -638,31 +592,35 @@ class CollapsedRGMSSampler(CollapsedMSSampler):
 
         for _ in range(self.max_gibbs_scans):
 
-            self._algorithm_3_iterate(n, x_n, c_n, inv_c, n_c,
+            self._gibbs_iterate(n, x_n, c_n, inv_c, n_c,
                     active_components, inactive_components, process_param,
-                    mixture_params, random_state)
+                    mixture_params, 1, random_state)
 
             process_param.iterate(n, len(active_components))
 
 
 class CollapsedSAMSSampler(CollapsedMSSampler):
     """
-    Collapsed sequentially-allocated merge-split (SAMS) sampler for Dirichlet
-    process mixture model.
+    Collapsed sequentially-allocated merge-split (SAMS) sampler.
 
     Methods
     -------
-    ``inference(x_n, c_n, random_state)``
+    ``infer(x_n, c_n, max_iter, warmup, random_state)``
         Component inference.
 
     Parameters
     ----------
-    mixture_model : compatible MMBase instance
-        Compatible mixture model
-    max_iter : int
+    process_model : compatible GenericProcess instance
+        Compatible process model
+    max_iter : None or int, optional
         The maximum number of iterations. The algorithm will be terminated
         once this many iterations have elapsed. This must be greater than 0.
         Default is 1000
+    warmup : None or int, optional
+        The number of warm-up iterations. The algorithm will discard the
+        results of all iterations until this many iterations have elapsed.
+        This must be non-negative and smaller than max_iter. Default is
+        max_iter / 2
     """
 
     compatible_process_models = set([DP, MFM])
@@ -699,8 +657,8 @@ class CollapsedSAMSSampler(CollapsedMSSampler):
             for index, launch in enumerate([launch_i, launch_j]):
                 # launch.n_c must never be zero!
                 # TODO: make sure of that
-                log_dist[index] = process_param.log_prior(n, launch.n_c) + \
-                        launch.mixture_param.log_likelihood(x_n[l])
+                log_dist[index] = process_param.log_prior(n, launch.n_c, 1) \
+                        + launch.mixture_param.log_likelihood(x_n[l])
 
             log_dist_max = log_dist.max()
             log_dist -= log_dist_max + \
@@ -761,8 +719,8 @@ class CollapsedSAMSSampler(CollapsedMSSampler):
                 inactive_components, process_param, mixture_params,
                 random_state)
 
-        self._algorithm_3_iterate(n, x_n, c_n, inv_c, n_c, active_components,
-                inactive_components, process_param, mixture_params,
+        self._gibbs_iterate(n, x_n, c_n, inv_c, n_c, active_components,
+                inactive_components, process_param, mixture_params, 1,
                 random_state)
 
         process_param.iterate(n, len(active_components))

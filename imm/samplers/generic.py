@@ -10,20 +10,22 @@ from ..models.mixtures import GenericMixture
 class GenericSampler(object):
     """
     Class which encapsulates common functionality between all samplers.
-
-    Parameters
-    ----------
-    mixture_model : compatible GenericProcess instance
-        Compatible process model
-    max_iter : int
-        The maximum number of iterations. The algorithm will be terminated
-        once this many iterations have elapsed. This must be greater than 0.
-        Default is 1000
     """
 
     __metaclass__  = abc.ABCMeta
 
     compatible_process_models = set()
+
+    compatible_mixture_models = set()
+
+    def __init__(self, process_model, max_iter=1000, warmup=None):
+
+        self._process_model = self._check_process_model(process_model)
+
+        self._mixture_model = self._check_mixture_model(
+            self._process_model._mixture_model)
+
+        self._max_iter, self._warmup = self._check_max_iter(max_iter, warmup)
 
     @classmethod
     def _check_process_model(cls, process_model):
@@ -56,8 +58,6 @@ class GenericSampler(object):
             return self._check_process_model(process_model)
         else:
             return self._process_model
-
-    compatible_mixture_models = set()
 
     @classmethod
     def _check_mixture_model(cls, mixture_model):
@@ -160,15 +160,6 @@ class GenericSampler(object):
         else:
             return self._warmup
 
-    def __init__(self, process_model, max_iter=1000, warmup=None):
-
-        self._process_model = self._check_process_model(process_model)
-
-        self._mixture_model = self._check_mixture_model(
-            self._process_model._mixture_model)
-
-        self._max_iter, self._warmup = self._check_max_iter(max_iter, warmup)
-
     @staticmethod
     def _check_examples(x_n):
 
@@ -204,6 +195,79 @@ class GenericSampler(object):
 
         return c_n
 
+    @staticmethod
+    def _gibbs_iterate(n, x_n, c_n, inv_c, n_c, active_components,
+            inactive_components, process_param, mixture_params, m,
+            random_state):
+        """
+        Performs a single iteration of Radford Neal's algorithms 3 or 8, see
+        Neal (2000).
+        """
+
+        for i in range(n):
+
+            prev_k = c_n[i]
+
+            # Bookkeeping. Note that Neal's algorithms do not need inv_c to
+            # work. It is used only in the split & merge algorithms
+            if inv_c is not None:
+                inv_c[prev_k].remove(i)
+
+            # Downdate component counter
+            n_c[prev_k] -= 1
+
+            # Downdate model-dependent parameters
+            mixture_params[prev_k].downdate(x_n[i])
+
+            # If the previous component is empty after example i is removed,
+            # recycle it and propose it as new component. If it is not empty,
+            # we need to get a new component from the inactive_components set
+            if n_c[prev_k] == 0:
+                proposed_components = set([prev_k])
+            else:
+                proposed_components = set([inactive_components.pop()])
+            for _ in range(1, m):
+                proposed_components.add(inactive_components.pop())
+            active_components |= proposed_components
+
+            # Make sure the proposed components are not contaminated with
+            # obsolete information
+            for k in (proposed_components - set([prev_k])):
+               mixture_params[k].iterate()
+
+            # Initialize and populate the total log probability accumulator
+            log_dist = np.empty(len(n_c), dtype=float)
+            log_dist.fill(-np.inf)
+            for k in active_components:
+                # Calculate the process prior and mixture likelihood
+                log_dist[k] = process_param.log_prior(n, n_c[k], m) + \
+                        mixture_params[k].log_likelihood(x_n[i])
+
+            # Sample from log_dist. Normalization is not required
+            # TODO: Find a better way to sample
+            cdf = np.cumsum(np.exp(log_dist - log_dist.max()))
+            r = random_state.uniform(size=1) * cdf[-1]
+            [next_k] = cdf.searchsorted(r)
+
+            c_n[i] = next_k
+
+            # More bookkeeping
+            if inv_c is not None:
+                inv_c[next_k].add(i)
+
+            # Update component counter
+            n_c[next_k] += 1
+
+            # Update model-dependent parameters
+            mixture_params[next_k].update(x_n[i])
+
+            # Cleanup
+            proposed_components.discard(next_k)
+            active_components -= proposed_components
+            inactive_components |= proposed_components
+
+    # TODO: infer has different arguments depending on whether it's a
+    #       collapsed or non-collapsed sampler. Do something about that
     @abc.abstractmethod
     def infer(self, x_n, c_n, max_iter=1000, warmup=None, random_state=None):
 

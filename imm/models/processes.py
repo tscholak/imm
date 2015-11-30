@@ -188,7 +188,7 @@ class GenericProcess(object):
                 log_dist.fill(-np.inf)
                 for k in active_components:
                     # Calculate the process prior
-                    log_dist[k] = process_param.log_prior(i+1, n_c[k])
+                    log_dist[k] = process_param.log_prior(i+1, n_c[k], 1)
 
                 # Sample from log_dist. Normalization is not required
                 # TODO: Find a better way to sample
@@ -217,7 +217,8 @@ class GenericProcess(object):
         random_state = self._get_random_state(random_state)
         sampler = self._get_sampler(sampler)
 
-        c_n = sampler.infer(x_n, c_n, max_iter, warmup, random_state)
+        c_n = sampler.infer(x_n=x_n, c_n=c_n, max_iter=max_iter,
+                warmup=warmup, random_state=random_state)
 
         return _squeeze_output(c_n)
 
@@ -243,8 +244,8 @@ class DP(GenericProcess):
     def __init__(self, mixture_model, alpha=1.0, a=None, b=None, sampler=None,
             seed=None):
 
-        from ..samplers import CollapsedGibbsSampler
-        self.default_sampler = CollapsedGibbsSampler
+        from ..samplers import GibbsSampler
+        self.default_sampler = GibbsSampler
 
         super(DP, self).__init__(mixture_model, sampler, seed)
 
@@ -291,7 +292,7 @@ class DP(GenericProcess):
             else:
                 return self._alpha
 
-        def log_prior(self, n, n_c):
+        def log_prior(self, n, n_c, m):
             """
             Return the logarithm of the conditional prior.
             """
@@ -299,7 +300,7 @@ class DP(GenericProcess):
             if n_c == 0:
                 # The conditional prior of a new component is proportional to
                 # alpha
-                return np.log(self.alpha)
+                return np.log(self.alpha) - np.log(m)
             elif n_c > 0:
                 # The conditional priors of all existing components are
                 # proportional to the number of examples assigned to them
@@ -308,6 +309,7 @@ class DP(GenericProcess):
                 raise ValueError("'n_c' must be non-negative.")
 
         def dump(self):
+
             return self._alpha
 
     class DrawParam(Param):
@@ -383,8 +385,8 @@ class MFM(GenericProcess):
     def __init__(self, mixture_model, gamma=1.0, mu=1.0, sampler=None,
             seed=None):
 
-        from ..samplers import CollapsedGibbsSampler
-        self.default_sampler = CollapsedGibbsSampler
+        from ..samplers import GibbsSampler
+        self.default_sampler = GibbsSampler
 
         super(MFM, self).__init__(mixture_model, sampler, seed)
 
@@ -516,7 +518,7 @@ class MFM(GenericProcess):
             else:
                 return self._mu
 
-        def log_prior(self, n, n_c):
+        def log_prior(self, n, n_c, m):
             """
             Return the logarithm of the conditional prior.
             """

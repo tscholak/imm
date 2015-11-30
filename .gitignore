@@ -60,4 +60,5 @@ target/
 
 # Misc
 scratch/
-test.py
+.ipynb_checkpoints/
+opsnr.stt
