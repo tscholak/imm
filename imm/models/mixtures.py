@@ -4,8 +4,9 @@ import abc
 import numpy as np
 from scipy.linalg import cholesky, cho_solve, solve_triangular
 from scipy._lib._util import check_random_state
-from scipy.stats._multivariate import (_squeeze_output, _process_quantiles,
-        multivariate_normal, wishart, invwishart)
+from scipy.stats._multivariate import (_LOG_2, _LOG_2PI, _squeeze_output,
+        _process_quantiles, multivariate_normal, wishart, invwishart)
+from scipy.special import multigammaln
 
 from ..utils import _chol_downdate, _chol_update, multivariate_t
 
@@ -58,7 +59,12 @@ class GenericMixture(object):
             raise NotImplementedError
 
         @abc.abstractmethod
-        def iterate(self):
+        def iterate(self, compute_log_likelihood=False):
+
+            raise NotImplementedError
+
+        @abc.abstractmethod
+        def iterate_to(self, mixture_param, compute_log_likelihood=False):
 
             raise NotImplementedError
 
@@ -179,6 +185,29 @@ class ConjugateGaussianMixture(GenericMixture):
 
         return mixture_model
 
+    def _ms_log_prior(self, mixture_param):
+
+        return 0.0
+
+    def _ms_log_likelihood(self, x_n, inv_c, mixture_param, random_state):
+        """
+        Logarithm of the likelihood appearing in the M-H acceptance ratio used
+        by the merge-split samplers.
+        """
+
+        ret = 0.0
+
+        mixture_param = self.InferParam(self, random_state)
+
+        # The order in which the for loop is enumerated does not have an
+        # influence on the result.
+        for index, l in enumerate(inv_c):
+            ret += mixture_param.log_likelihood(x_n[l])
+            if index < len(inv_c)-1:
+                mixture_param.update(x_n[l])
+
+        return ret
+
     class DrawParam(GenericMixture.DrawParam):
 
         def __init__(self, mixture_model, random_state):
@@ -213,8 +242,7 @@ class ConjugateGaussianMixture(GenericMixture):
                 self._mean = _squeeze_output(
                         self._random_state.multivariate_normal(
                                 self._mixture_model.xi,
-                                self.cov / self._mixture_model.rho,
-                                1))
+                                self.cov / self._mixture_model.rho, 1))
 
             return self._mean
 
@@ -222,6 +250,12 @@ class ConjugateGaussianMixture(GenericMixture):
 
             return _squeeze_output(self._random_state.multivariate_normal(
                     self.mean, self.cov, 1))
+
+        def phi_c(self):
+
+            # TODO: Switch to mean mu_c and precision S_c
+
+            return {'mean': self.mean, 'covariance': self.cov}
 
         def dump(self):
 
@@ -328,6 +362,7 @@ class ConjugateGaussianMixture(GenericMixture):
             _chol_update(mm.dim, self._beta_W_c_chol,
                     np.sqrt(self._rho_c/(self._rho_c-1.0)) * (x-self._xi_c))
 
+            # TODO: Find better way to do this
             self._df = None
             self._scale_chol = None
             self._scale_logdet = None
@@ -364,15 +399,20 @@ class ConjugateGaussianMixture(GenericMixture):
             _chol_downdate(mm.dim, self._beta_W_c_chol,
                     np.sqrt(self._rho_c/(self._rho_c+1.0)) * (x-self._xi_c))
 
+            # TODO: Find better way to do this
             self._df = None
             self._scale_chol = None
             self._scale_logdet = None
 
             return self
 
-        def iterate(self):
+        def iterate(self, compute_log_likelihood=False):
 
-            pass
+            return 0.0
+
+        def iterate_to(self, mixture_param, compute_log_likelihood=False):
+
+            return 0.0
 
         def log_likelihood(self, x):
 
@@ -381,6 +421,13 @@ class ConjugateGaussianMixture(GenericMixture):
             return _squeeze_output(multivariate_t._logpdf(
                     multivariate_t._process_quantiles(x, dim), dim, self.xi_c,
                     self.scale_chol, self.scale_logdet, self.df))
+
+        def phi_c(self):
+
+            # TODO: Draw component parameters on demand from conditional
+            #       posterior?
+
+            return None
 
         def dump(self):
 
@@ -521,6 +568,40 @@ class NonconjugateGaussianMixture(GenericMixture):
 
         return mixture_model
 
+    def _ms_log_prior(self, mixture_param):
+
+        ret = 0.0
+
+        R_logdet = 2.0 * np.sum(np.log(np.diagonal(self._R_chol)))
+        maha = np.sum(np.square(np.dot(mixture_param.mu_c - self.xi,
+                self._R_chol)))
+        ret += -0.5 * (self.dim * _LOG_2PI - R_logdet + maha)
+
+        _, S_c_chol, S_c_logdet = mixture_param.S_c
+        # TODO: Make better use of lower triangular shape. np.einsum?
+        beta_W_S_c_tr = np.sum(np.square(np.dot(self._beta_W_chol.T,
+                S_c_chol)))
+        beta_W_logdet = 2.0 * np.sum(np.log(np.diagonal(self._beta_W_chol)))
+        ret += 0.5 * (self.beta - self.dim - 1) * S_c_logdet - 0.5 * \
+                beta_W_S_c_tr - 0.5 * self.beta * self.dim * _LOG_2 + 0.5 * \
+                self.beta * beta_W_logdet - multigammaln(0.5*self.beta,
+                        self.dim)
+
+        return ret
+
+    def _ms_log_likelihood(self, x_n, inv_c, mixture_param, random_state):
+        """
+        Logarithm of the likelihood appearing in the M-H acceptance ratio used
+        by the merge-split samplers.
+        """
+
+        ret = 0.0
+
+        for _, l in enumerate(inv_c):
+            ret += mixture_param.log_likelihood(x_n[l])
+
+        return ret
+
     class DrawParam(GenericMixture.DrawParam):
 
         def __init__(self, mixture_model, random_state):
@@ -532,50 +613,69 @@ class NonconjugateGaussianMixture(GenericMixture):
                     NonconjugateGaussianMixture._check_mixture_model(
                             mixture_model)
 
-            self._precision_chol = None
-            self._mean = None
+            self._mu_c = None
+            self._S_c = None
 
         @property
-        def precision_chol(self):
+        def mu_c(self):
 
-            if self._precision_chol is None:
+            if self._mu_c is None:
 
                 mm = self._mixture_model
 
-                precision = _squeeze_output(wishart._rvs(1, (1,), mm.dim,
-                        mm.beta, mm._beta_W_chol, self._random_state))
+                mu_c = self._random_state.normal(loc=0.0, scale=1.0,
+                        size=mm.dim)
+                mu_c = solve_triangular(mm._R_chol, mu_c, lower=True,
+                        trans='T', overwrite_b=True, check_finite=False)
+                mu_c += mm.xi
 
-                self._precision_chol = cholesky(precision, lower=True)
+                self._mu_c = mu_c
 
-            return self._precision_chol
+            return self._mu_c
 
         @property
-        def mean(self):
+        def S_c(self):
 
-            if self._mean is None:
+            if self._S_c is None:
 
-                self._mean = self._random_state.normal(loc=0.0, scale=1.0,
-                        size=self._mixture_model.dim)
-                self._mean = solve_triangular(self._mixture_model._R_chol,
-                        self._mean, lower=True, trans='T', overwrite_b=True,
+                mm = self._mixture_model
+
+                S_c = _squeeze_output(wishart._standard_rvs(1, (1,), mm.dim,
+                        mm.beta, self._random_state))
+                S_c = solve_triangular(mm._beta_W_chol, S_c, trans='T',
+                        lower=True, unit_diagonal=False, overwrite_b=True,
                         check_finite=False)
-                self._mean += self._mixture_model.xi
+                S_c = np.dot(S_c, S_c.T)
 
-            return self._mean
+                S_c_chol = cholesky(S_c, lower=True)
+
+                S_c_logdet = 2.0 * np.sum(np.log(np.diagonal(S_c_chol)))
+
+                self._S_c = (S_c, S_c_chol, S_c_logdet)
+
+            return self._S_c
 
         def draw_x_n(self):
 
+            S_c, _, _ = self.S_c
+
             x_n = self._random_state.normal(loc=0.0, scale=1.0,
                     size=self._mixture_model.dim)
-            x_n = solve_triangular(self.precision_chol, x_n, lower=True,
-                    trans='T', overwrite_b=True, check_finite=False)
-            x_n += self.mean
+            x_n = solve_triangular(S_c, x_n, lower=True, trans='T',
+                    overwrite_b=True, check_finite=False)
+            x_n += self.mu_c
 
             return x_n
 
+        def phi_c(self):
+
+            S_c, _, _ = self.S_c
+
+            return {'mean': self.mu_c, 'precision': S_c}
+
         def dump(self):
 
-            return self._mean, self._precision_chol
+            return self._mu_c, self._S_c
 
     class InferParam(GenericMixture.InferParam):
 
@@ -592,8 +692,11 @@ class NonconjugateGaussianMixture(GenericMixture):
             self._beta_c = None
             self._xsum_c = None
             self._beta_W_help_c_chol = None
+
             self._mu_c = None
             self._S_c = None
+
+            # self.iterate()
 
         @property
         def n_c(self):
@@ -632,14 +735,13 @@ class NonconjugateGaussianMixture(GenericMixture):
 
             if self._mu_c is None:
                 mm = self._mixture_model
-                self._mu_c = self._draw_mu_c(mm.dim, self.n_c, self.xsum_c,
+                self._mu_c, _ = self._draw_mu_c(mm.dim, self.n_c, self.xsum_c,
                         self._S_c, mm.R, mm._R_chol, mm.xi, mm._R_xi,
                         self._random_state)
             return self._mu_c
 
         @staticmethod
-        def _draw_mu_c(dim, n_c, xsum_c, S_c, R, R_chol, xi, R_xi,
-                random_state):
+        def _prepare_mu_c(n_c, xsum_c, S_c, R, R_chol, xi, R_xi):
 
             if n_c > 0:
                 if S_c is None:
@@ -652,25 +754,50 @@ class NonconjugateGaussianMixture(GenericMixture):
                 R_c_chol = R_chol
                 xi_c = xi
 
+            return R_c_chol, xi_c
+
+        @staticmethod
+        def _log_likelihood_mu_c(dim, R_c_chol, xi_c, mu_c):
+
+            R_c_logdet = 2.0 * np.sum(np.log(np.diagonal(R_c_chol)))
+            maha = np.sum(np.square(np.dot(mu_c - xi_c, R_c_chol)))
+
+            return -0.5 * (dim * _LOG_2PI - R_c_logdet + maha)
+
+            # return _squeeze_output(multivariate_normal._logpdf(
+            #         _process_quantiles(mu_c, dim), xi_c, R_c_chol,
+            #         -R_c_logdet, dim))
+
+        @classmethod
+        def _draw_mu_c(cls, dim, n_c, xsum_c, S_c, R, R_chol, xi, R_xi,
+                random_state, compute_log_likelihood=False):
+
+            R_c_chol, xi_c = cls._prepare_mu_c(n_c, xsum_c, S_c, R, R_chol,
+                    xi, R_xi)
+
             mu_c = random_state.normal(loc=0.0, scale=1.0, size=dim)
             mu_c = solve_triangular(R_c_chol, mu_c, lower=True, trans='T',
                     overwrite_b=True, check_finite=False)
             mu_c += xi_c
 
-            return mu_c
+            log_likelihood = 0.0
+            if compute_log_likelihood:
+                log_likelihood += cls._log_likelihood_mu_c(dim, R_c_chol,
+                        xi_c, mu_c)
+
+            return mu_c, log_likelihood
 
         @property
         def S_c(self):
 
             if self._S_c is None:
-                self._S_c = self._draw_S_c(self._mixture_model.dim, self.n_c,
-                        self.beta_W_help_c_chol, self.xsum_c, self._mu_c,
-                        self.beta_c, self._random_state)
+                self._S_c, _ = self._draw_S_c(self._mixture_model.dim,
+                        self.n_c, self.beta_W_help_c_chol, self.xsum_c,
+                        self._mu_c, self.beta_c, self._random_state)
             return self._S_c
 
         @staticmethod
-        def _draw_S_c(dim, n_c, beta_W_help_c_chol, xsum_c, mu_c, beta_c,
-                random_state):
+        def _prepare_S_c(dim, n_c, beta_W_help_c_chol, xsum_c, mu_c):
 
             if n_c > 0:
                 if mu_c is None:
@@ -681,18 +808,49 @@ class NonconjugateGaussianMixture(GenericMixture):
             else:
                 beta_W_c_chol = beta_W_help_c_chol
 
+            return beta_W_c_chol
+
+        @staticmethod
+        def _log_likelihood_S_c(dim, beta_c, beta_W_c_chol, S_c_chol,
+                S_c_logdet):
+
+            # TODO: Make better use of lower triangular shape. np.einsum?
+            beta_W_S_c_tr = np.sum(np.square(np.dot(beta_W_c_chol.T,
+                    S_c_chol)))
+            beta_W_c_logdet = 2.0 * np.sum(np.log(np.diagonal(beta_W_c_chol)))
+
+            return 0.5 * (beta_c - dim - 1) * S_c_logdet - 0.5 * \
+                    beta_W_S_c_tr - 0.5 * beta_c * dim * _LOG_2 + 0.5 * \
+                    beta_c * beta_W_c_logdet - multigammaln(0.5*beta_c, dim)
+
+        @classmethod
+        def _draw_S_c(cls, dim, n_c, beta_W_help_c_chol, xsum_c, mu_c, beta_c,
+                random_state, compute_log_likelihood=False):
+
+            beta_W_c_chol = cls._prepare_S_c(dim, n_c, beta_W_help_c_chol,
+                    xsum_c, mu_c)
+
+            # By the book, but slow
+            # S_c = _squeeze_output(wishart._rvs(1, (1,), dim, beta_c,
+            #         cholesky(np.linalg.inv(np.dot(beta_W_c_chol,
+            #                 beta_W_c_chol.T)), lower=True), random_state))
+
             S_c = _squeeze_output(wishart._standard_rvs(1, (1,), dim, beta_c,
                     random_state))
             S_c = solve_triangular(beta_W_c_chol, S_c, trans='T', lower=True,
                     unit_diagonal=False, overwrite_b=True, check_finite=False)
             S_c = np.dot(S_c, S_c.T)
-            # S_c = _squeeze_output(wishart._rvs(1, (1,), dim, beta_c,
-            #         cholesky(np.linalg.inv(np.dot(beta_W_c_chol,
-            #                 beta_W_c_chol.T), lower=True), random_state))
+
             S_c_chol = cholesky(S_c, lower=True)
+
             S_c_logdet = 2.0 * np.sum(np.log(np.diagonal(S_c_chol)))
 
-            return S_c, S_c_chol, S_c_logdet
+            log_likelihood = 0.0
+            if compute_log_likelihood:
+                log_likelihood += cls._log_likelihood_S_c(dim, beta_c,
+                        beta_W_c_chol, S_c_chol, S_c_logdet)
+
+            return (S_c, S_c_chol, S_c_logdet), log_likelihood
 
         def update(self, x):
 
@@ -763,25 +921,68 @@ class NonconjugateGaussianMixture(GenericMixture):
 
             return self
 
-        def iterate(self):
+        def iterate(self, compute_log_likelihood=False):
 
             mm = self._mixture_model
+
             dim = mm.dim
 
-            self._mu_c = self._draw_mu_c(dim, self.n_c, self.xsum_c,
-                    self._S_c, mm.R, mm._R_chol, mm.xi, mm._R_xi,
-                    self._random_state)
-            self._S_c = self._draw_S_c(dim, self.n_c, self.beta_W_help_c_chol,
-                    self.xsum_c, self._mu_c, self.beta_c, self._random_state)
+            self._mu_c, log_likelihood_mu_c = self._draw_mu_c(dim, self.n_c,
+                    self.xsum_c, self._S_c, mm.R, mm._R_chol, mm.xi, mm._R_xi,
+                    self._random_state, compute_log_likelihood)
+
+            self._S_c, log_likelihood_S_c = self._draw_S_c(dim, self.n_c,
+                    self.beta_W_help_c_chol, self.xsum_c, self._mu_c,
+                    self.beta_c, self._random_state, compute_log_likelihood)
+
+            return log_likelihood_mu_c + log_likelihood_S_c
+
+        def iterate_to(self, mixture_param, compute_log_likelihood=False):
+
+            mm = self._mixture_model
+
+            dim = mm.dim
+
+            log_likelihood = 0.0
+
+            self._mu_c = mixture_param._mu_c
+
+            if compute_log_likelihood:
+                R_c_chol, xi_c = self._prepare_mu_c(self.n_c, self.xsum_c,
+                        self._S_c, mm.R, mm._R_chol, mm.xi, mm._R_xi)
+                log_likelihood += self._log_likelihood_mu_c(dim, R_c_chol,
+                        xi_c, self._mu_c)
+
+            self._S_c = mixture_param._S_c
+
+            if compute_log_likelihood:
+                _, S_c_chol, S_c_logdet = self._S_c
+                beta_W_c_chol = self._prepare_S_c(dim, self.n_c,
+                        self.beta_W_help_c_chol, self.xsum_c, self._mu_c)
+                log_likelihood += self._log_likelihood_S_c(dim, self.beta_c,
+                        beta_W_c_chol, S_c_chol, S_c_logdet)
+
+            return log_likelihood
 
         def log_likelihood(self, x):
 
             dim = self._mixture_model.dim
+
             _, S_c_chol, S_c_logdet = self.S_c
 
-            return _squeeze_output(multivariate_normal._logpdf(
-                    _process_quantiles(x, dim), self.mu_c,
-                    S_c_chol, -S_c_logdet, dim))
+            maha = np.sum(np.square(np.dot(x - self.mu_c, S_c_chol)))
+
+            return -0.5 * (dim * _LOG_2PI - S_c_logdet + maha)
+
+            # return _squeeze_output(multivariate_normal._logpdf(
+            #         _process_quantiles(x, dim), self.mu_c,
+            #         S_c_chol, -S_c_logdet, dim))
+
+        def phi_c(self):
+
+            S_c, _, _ = self.S_c
+
+            return {'mean': self.mu_c, 'precision': S_c}
 
         def dump(self):
 

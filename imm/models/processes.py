@@ -209,18 +209,17 @@ class GenericProcess(object):
                     active_components.remove(prop_k)
                     inactive_components.add(prop_k)
 
+        # TODO: Make it possible to return the component parameters
+
         return _squeeze_output(x_n), _squeeze_output(c_n)
 
-    def infer(self, x_n, c_n=None, sampler=None, max_iter=None, warmup=None,
-            random_state=None):
+    def infer(self, *args, **kwargs):
 
-        random_state = self._get_random_state(random_state)
-        sampler = self._get_sampler(sampler)
+        sampler = self._get_sampler(kwargs.pop('sampler', None))
 
-        c_n = sampler.infer(x_n=x_n, c_n=c_n, max_iter=max_iter,
-                warmup=warmup, random_state=random_state)
+        c_n, phi_c = sampler.infer(*args, **kwargs)
 
-        return _squeeze_output(c_n)
+        return _squeeze_output(c_n), phi_c
 
 
 class DP(GenericProcess):
@@ -268,6 +267,26 @@ class DP(GenericProcess):
                 alpha = 1.0
 
         return alpha, a, b
+
+    def _ms_log_prior_pre(self, n, t, tp, process_param):
+        """
+        First term in the logarithm of the prior appearing in the M-H
+        acceptance ratio used by the merge-split samplers.
+        """
+
+        ret = (t-tp) * np.log(process_param.alpha)
+
+        return ret
+
+    def _ms_log_prior_post(self, nc, process_param):
+        """
+        Second term in the logarithm of the prior appearing in the M-H
+        acceptance ratio used by the merge-split samplers.
+        """
+
+        ret = gammaln(nc)
+
+        return ret
 
     class Param(GenericProcess.Param):
 
@@ -350,20 +369,6 @@ class DP(GenericProcess):
                 alpha += (1-pi_x) * self._random_state.gamma(shape, scale)
 
                 self._alpha = alpha
-
-        def log_prior_quotient_pre(self, n, t, tp):
-            """
-            Evaluate certain expressions used by the split-merge samplers.
-            """
-
-            return (t-tp) * np.log(self.alpha)
-
-        def log_prior_quotient_post(self, nc):
-            """
-            Evaluate certain expressions used by the split-merge samplers.
-            """
-
-            return gammaln(nc)
 
 
 class MFM(GenericProcess):
@@ -485,6 +490,27 @@ class MFM(GenericProcess):
 
             return ret
 
+    def _ms_log_prior_pre(self, n, t, tp, process_param):
+        """
+        First term in the logarithm of the prior appearing in the M-H
+        acceptance ratio used by the merge-split samplers.
+        """
+
+        ret = self._log_v_quotient(n, t, tp, process_param.gamma,
+                process_param.mu, memo=process_param._log_v_quotient_memo)
+
+        return ret
+
+    def _ms_log_prior_post(self, nc, process_param):
+        """
+        Second term in the logarithm of the prior appearing in the M-H
+        acceptance ratio used by the merge-split samplers.
+        """
+
+        ret = gammaln(process_param.gamma + nc) - gammaln(process_param.gamma)
+
+        return ret
+
     class Param(GenericProcess.Param):
 
         def __init__(self, process_model, random_state):
@@ -553,22 +579,3 @@ class MFM(GenericProcess):
 
         def iterate(self, n, k):
             pass
-
-        def log_prior_quotient_pre(self, n, t, tp):
-            """
-            Evaluate certain expressions used by the split-merge samplers.
-            """
-
-            pm = self._process_model
-
-            ret = pm._log_v_quotient(n, t, tp, self.gamma, self.mu,
-                    memo=self._log_v_quotient_memo)
-
-            return ret
-
-        def log_prior_quotient_post(self, nc):
-            """
-            Evaluate certain expressions used by the split-merge samplers.
-            """
-
-            return gammaln(self.gamma + nc) - gammaln(self.gamma)
