@@ -22,7 +22,7 @@ class GenericMixture(object):
 
         super(GenericMixture, self).__init__()
 
-    class Param(object):
+    class _Param(object):
 
         __metaclass__  = abc.ABCMeta
 
@@ -35,7 +35,7 @@ class GenericMixture(object):
 
             raise NotImplementedError
 
-    class DrawParam(Param):
+    class DrawParam(_Param):
 
         __metaclass__  = abc.ABCMeta
 
@@ -44,7 +44,7 @@ class GenericMixture(object):
 
             raise NotImplementedError
 
-    class InferParam(Param):
+    class InferParam(_Param):
 
         __metaclass__  = abc.ABCMeta
 

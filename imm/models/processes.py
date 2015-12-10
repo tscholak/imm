@@ -127,7 +127,7 @@ class GenericProcess(object):
 
         return n, m, shape
 
-    class Param(object):
+    class _Param(object):
 
         __metaclass__  = abc.ABCMeta
 
@@ -137,6 +137,29 @@ class GenericProcess(object):
 
         @abc.abstractmethod
         def dump(self):
+
+            raise NotImplementedError
+
+    class DrawParam(_Param):
+
+        __metaclass__  = abc.ABCMeta
+
+        @abc.abstractmethod
+        def log_prior(self, n, n_c):
+
+            raise NotImplementedError
+
+    class InferParam(_Param):
+
+        __metaclass__  = abc.ABCMeta
+
+        @abc.abstractmethod
+        def log_prior(self, n, n_c, m):
+
+            raise NotImplementedError
+
+        @abc.abstractmethod
+        def iterate(self, n, k):
 
             raise NotImplementedError
 
@@ -188,13 +211,15 @@ class GenericProcess(object):
                 log_dist.fill(-np.inf)
                 for k in active_components:
                     # Calculate the process prior
-                    log_dist[k] = process_param.log_prior(i+1, n_c[k], 1)
+                    log_dist[k] = process_param.log_prior(i+1, n_c[k])
 
-                # Sample from log_dist. Normalization is not required
-                # TODO: Find a better way to sample
-                cdf = np.cumsum(np.exp(log_dist - log_dist.max()))
-                r = random_state.uniform(size=1) * cdf[-1]
-                [next_k] = cdf.searchsorted(r)
+                # Sample from log_dist. Normalization is required
+                log_dist -= logsumexp(log_dist)
+                next_k = random_state.choice(a=c_max, p=np.exp(log_dist))
+
+                # cdf = np.cumsum(np.exp(log_dist - log_dist.max()))
+                # r = random_state.uniform(size=1) * cdf[-1]
+                # [next_k] = cdf.searchsorted(r)
 
                 c_n[index+(i,)] = next_k
 
@@ -268,6 +293,16 @@ class DP(GenericProcess):
 
         return alpha, a, b
 
+    @classmethod
+    def _check_process_model(cls, process_model):
+
+        if not isinstance(process_model, cls):
+            raise ValueError("'process_model' must be a Dirichlet"
+                             " process (DP) model."
+                             " Got process_model = %r" % process_model)
+
+        return process_model
+
     def _ms_log_prior_pre(self, n, t, tp, process_param):
         """
         First term in the logarithm of the prior appearing in the M-H
@@ -288,18 +323,53 @@ class DP(GenericProcess):
 
         return ret
 
-    class Param(GenericProcess.Param):
+    class DrawParam(GenericProcess.DrawParam):
 
         def __init__(self, process_model, random_state):
 
-            super(DP.Param, self).__init__(random_state)
+            super(DP.DrawParam, self).__init__(random_state)
 
-            if isinstance(process_model, DP):
-                self._process_model = process_model
+            self._process_model = DP._check_process_model(process_model)
+
+            self._alpha = None
+
+        @property
+        def alpha(self):
+
+            if self._alpha is None:
+                pm = self._process_model
+
+                # TODO: Use try-except instead?
+                if pm.a is not None and pm.b is not None:
+                    self._alpha = self._random_state.gamma(pm.a, pm.b)
+                else:
+                    self._alpha = pm.alpha
+
+            return self._alpha
+
+        def log_prior(self, n, n_c):
+            """
+            Return the logarithm of the conditional prior.
+            """
+
+            if n_c == 0:
+                return np.log(self.alpha)
+            elif n_c > 0:
+                return np.log(n_c)
             else:
-                raise ValueError("'process_model' must be a Dirichlet"
-                                 " process (DP) model."
-                                 " Got process_model = %r" % process_model)
+                raise ValueError("'n_c' must be non-negative.")
+
+        def dump(self):
+
+            return self._alpha
+
+    class InferParam(GenericProcess.InferParam):
+
+        def __init__(self, process_model, random_state):
+
+            super(DP.InferParam, self).__init__(random_state)
+
+            self._process_model = DP._check_process_model(process_model)
 
             self._alpha = None
 
@@ -327,28 +397,6 @@ class DP(GenericProcess):
             else:
                 raise ValueError("'n_c' must be non-negative.")
 
-        def dump(self):
-
-            return self._alpha
-
-    class DrawParam(Param):
-
-        @property
-        def alpha(self):
-
-            if self._alpha is None:
-                pm = self._process_model
-
-                # TODO: Use try-except instead?
-                if pm.a is not None and pm.b is not None:
-                    self._alpha = self._random_state.gamma(pm.a, pm.b)
-                else:
-                    self._alpha = pm.alpha
-
-            return self._alpha
-
-    class InferParam(Param):
-
         def iterate(self, n, k):
             """
             Sample a new value for alpha.
@@ -369,6 +417,10 @@ class DP(GenericProcess):
                 alpha += (1-pi_x) * self._random_state.gamma(shape, scale)
 
                 self._alpha = alpha
+
+        def dump(self):
+
+            return self._alpha
 
 
 class MFM(GenericProcess):
@@ -420,53 +472,18 @@ class MFM(GenericProcess):
 
         return gamma, mu
 
-    @staticmethod
-    def _v(n, t, gamma, mu, rtol=1e-08, atol=0, kmax=10000, memo={}):
-        # TODO: Make it possible to use a custom pmf p_K, e.g.
-        #       - Geometric: p_K(k) = (1-r)^(k-1) * r
-        #       - Poisson: p_K(k) = mu^(k-1)/(k-1)! * exp(-mu)
+    @classmethod
+    def _check_process_model(cls, process_model):
 
-        try:
-            ret = memo[(n,t)]
-            print "cache hit!"
-            return ret
-        except KeyError:
-            pass
+        if not isinstance(process_model, cls):
+            raise ValueError("'process_model' must be a mixture of"
+                             " finite mixtures (MFM) model."
+                             " Got process_model = %r" % process_model)
 
-        if t <= n:
-            try:
-                ret = memo[(n-1,t-1)]/gamma - ((n-1)/gamma+t-1)*memo[(n,t-1)]
-                print "cache hit!"
-                return ret
-            except KeyError:
-                pass
-
-        v_cur = 0.0
-        k = max(1, t)
-        pre = factorial(t)
-
-        while True:
-
-            v_old = v_cur
-            v_cur += pre / poch(gamma*k, n) * poisson._pmf(k-1, mu)
-
-            if np.isclose(v_cur, v_old, rtol, atol):
-                break
-
-            k += 1
-
-            if k == kmax:
-                break
-
-            pre *= k / float(k-t)
-
-        memo[(n,t)] = v_cur
-
-        return v_cur
+        return process_model
 
     @staticmethod
-    def _log_v_quotient(n, t, tp, gamma, mu, kmax=1000, memo={}):
-        # TODO: Sum up only sufficiently large terms
+    def _log_v_quotient(n, t, tp, gamma, mu, k_max=1000, diff=50.0, memo={}):
         # TODO: Make it possible to use a custom pmf p_K, e.g.
         #       - Geometric: p_K(k) = (1-r)^(k-1) * r
         #       - Poisson: p_K(k) = mu^(k-1)/(k-1)! * exp(-mu)
@@ -475,12 +492,16 @@ class MFM(GenericProcess):
             return memo[(n, t, tp)]
         except KeyError:
             def help(s):
-                tmp = np.array(
-                        [(k*np.log(mu) - gammaln(1.0+k)
-                          + gammaln(1.0+(k+s)*gamma) - gammaln(1.0+s*gamma)
-                          + gammaln(n) - gammaln(n+(k+s)*gamma))
-                         for k in range(kmax)])
-                return s*gamma*np.log(n) + logsumexp(tmp)
+                comp = gammaln(n) - gammaln(n+s*gamma) - diff
+                ret = np.empty(k_max, dtype=float)
+                for k in range(k_max):
+                    ret[k] = gammaln(n) + k*np.log(mu) - gammaln(1.0+k) - \
+                            gammaln(1.0+s*gamma) - gammaln(n+(k+s)*gamma) + \
+                            gammaln(1.0+(k+s)*gamma)
+                    if ret[k] < comp:
+                        break
+                ret = s*gamma*np.log(n) + logsumexp(ret[:k+1])
+                return ret
 
             ret = help(t) - help(tp)
             ret += (t-tp) * (np.log(mu) - gamma*np.log(n))
@@ -511,18 +532,60 @@ class MFM(GenericProcess):
 
         return ret
 
-    class Param(GenericProcess.Param):
+    class DrawParam(GenericProcess.DrawParam):
 
         def __init__(self, process_model, random_state):
 
-            super(MFM.Param, self).__init__(random_state)
+            super(MFM.DrawParam, self).__init__(random_state)
 
-            if isinstance(process_model, MFM):
-                self._process_model = process_model
+            self._process_model = MFM._check_process_model(process_model)
+
+            self._gamma = None
+            self._mu = None
+            self._log_v_quotient_memo = {}
+
+        @property
+        def gamma(self):
+
+            if self._gamma is None:
+                return self._process_model.gamma
             else:
-                raise ValueError("'process_model' must be a mixture of"
-                                 " finite mixtures (MFM) model."
-                                 " Got process_model = %r" % process_model)
+                return self._gamma
+
+        @property
+        def mu(self):
+
+            if self._mu is None:
+                return self._process_model.mu
+            else:
+                return self._mu
+
+        def log_prior(self, n, n_c):
+            """
+            Return the logarithm of the conditional prior.
+            """
+
+            if n_c == 0:
+                pm = self._process_model
+                ret = np.log(self.gamma) + pm._log_v_quotient(n, n_c+1, n_c,
+                        self.gamma, self.mu, memo=self._log_v_quotient_memo)
+                return ret
+            elif n_c > 0:
+                return np.log(n_c + self.gamma)
+            else:
+                raise ValueError("'n_c' must be non-negative.")
+
+        def dump(self):
+
+            return self._gamma, self._mu
+
+    class InferParam(GenericProcess.InferParam):
+
+        def __init__(self, process_model, random_state):
+
+            super(MFM.InferParam, self).__init__(random_state)
+
+            self._process_model = MFM._check_process_model(process_model)
 
             self._gamma = None
             self._mu = None
@@ -554,8 +617,11 @@ class MFM(GenericProcess):
 
                 pm = self._process_model
 
-                ret = np.log(self.gamma) + pm._log_v_quotient(n, n_c+1, n_c,
-                        self.gamma, self.mu, memo=self._log_v_quotient_memo)
+                ret = np.log(self.gamma)
+                ret += pm._log_v_quotient(n, n_c+1, n_c, self.gamma, self.mu,
+                        memo=self._log_v_quotient_memo)
+                # TODO: Check that!
+                ret -= np.log(m)
 
                 return ret
 
@@ -567,15 +633,10 @@ class MFM(GenericProcess):
             else:
                 raise ValueError("'n_c' must be non-negative.")
 
+        def iterate(self, n, k):
+
+            pass
+
         def dump(self):
 
             return self._gamma, self._mu
-
-    class DrawParam(Param):
-
-        pass
-
-    class InferParam(Param):
-
-        def iterate(self, n, k):
-            pass
