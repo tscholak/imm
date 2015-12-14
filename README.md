@@ -13,8 +13,9 @@ http://nbviewer.ipython.org/github/tscholak/imm/blob/master/test.ipynb
 Credit goes to Hanna Wallach (UMass Amherst), whose
 [DPMM project](https://github.com/hannawallach/dpmm) laid the foundation for
 the present code. The unified approach, the application to (conditionally)
-conjugate Gaussian mixture models, and the SAMS code is my doing. Although the
-code underwent and continues to undergo significant testing, I cannot give a
-guarantee that it is correct or will produce correct results.
+conjugate Gaussian mixture models, the mixture of finite mixtures model,
+and the SAMS sampler is my doing. Although the code underwent and continues to
+undergo significant testing, please understand that I cannot give a guarantee
+that it is correct or will produce correct results.
 
 Torsten Scholak <torsten.scholak@googlemail.com>
