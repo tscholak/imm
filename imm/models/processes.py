@@ -489,8 +489,11 @@ class MFM(GenericProcess):
         #       - Poisson: p_K(k) = mu^(k-1)/(k-1)! * exp(-mu)
 
         try:
+
             return memo[(n, t, tp)]
+
         except KeyError:
+
             def help(s):
                 comp = gammaln(n) - gammaln(n+s*gamma) - diff
                 ret = np.empty(k_max, dtype=float)
