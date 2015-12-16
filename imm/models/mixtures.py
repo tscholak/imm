@@ -321,7 +321,8 @@ class ConjugateGaussianMixture(GenericMixture):
             if self._scale is None:
                 scale_chol = np.sqrt((self.rho_c+1.0) / \
                         (self.rho_c*self.df)) * self.beta_W_c_chol
-                scale_logdet = _chol_logdet(scale_chol)
+                scale_logdet = _chol_logdet(self._mixture_model.dim,
+                        scale_chol)
                 self._scale = (scale_chol, scale_logdet)
             return self._scale
 
@@ -569,13 +570,13 @@ class NonconjugateGaussianMixture(GenericMixture):
         ret = 0.0
 
         # TODO: Cache R_logdet
-        R_logdet = _chol_logdet(self._R_chol)
+        R_logdet = _chol_logdet(self.dim, self._R_chol)
         ret += _normal_logpdf(mixture_param.mu_c, self.dim, self.xi,
                 self._R_chol, R_logdet)
 
         _, S_c_chol, S_c_logdet = mixture_param.S_c
         # TODO: Cache beta_W_logdet
-        beta_W_logdet = _chol_logdet(self._beta_W_chol)
+        beta_W_logdet = _chol_logdet(self.dim, self._beta_W_chol)
         ret += _wishart_logpdf(S_c_chol, S_c_logdet, self.dim, self.beta,
                 self._beta_W_chol, beta_W_logdet)
 
@@ -630,7 +631,7 @@ class NonconjugateGaussianMixture(GenericMixture):
                 S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
                         self._random_state)
                 S_c_chol = _chol(S_c)
-                S_c_logdet = _chol_logdet(S_c_chol)
+                S_c_logdet = _chol_logdet(mm.dim, S_c_chol)
 
                 self._S_c = (S_c, S_c_chol, S_c_logdet)
 
@@ -736,7 +737,7 @@ class NonconjugateGaussianMixture(GenericMixture):
         @staticmethod
         def _log_likelihood_mu_c(dim, R_c_chol, xi_c, mu_c):
 
-            R_c_logdet = _chol_logdet(R_c_chol)
+            R_c_logdet = _chol_logdet(dim, R_c_chol)
             ret = _normal_logpdf(mu_c, dim, xi_c, R_c_chol, R_c_logdet)
 
             return ret
@@ -784,7 +785,7 @@ class NonconjugateGaussianMixture(GenericMixture):
         def _log_likelihood_S_c(dim, beta_c, beta_W_c_chol, S_c_chol,
                 S_c_logdet):
 
-            beta_W_c_logdet = _chol_logdet(beta_W_c_chol)
+            beta_W_c_logdet = _chol_logdet(dim, beta_W_c_chol)
             ret = _wishart_logpdf(S_c_chol, S_c_logdet, dim, beta_c,
                     beta_W_c_chol, beta_W_c_logdet)
 
@@ -799,7 +800,7 @@ class NonconjugateGaussianMixture(GenericMixture):
 
             S_c = _wishart_rvs(dim, beta_c, beta_W_c_chol, random_state)
             S_c_chol = _chol(S_c)
-            S_c_logdet = _chol_logdet(S_c_chol)
+            S_c_logdet = _chol_logdet(dim, S_c_chol)
 
             log_likelihood = 0.0
             if compute_log_likelihood:

@@ -3,8 +3,7 @@
 
 cimport cython
 from cpython cimport bool
-from libc.math cimport sqrt as csqrt
-from libc.math cimport hypot
+from libc.math cimport log as clog, sqrt as csqrt, lgamma as cgammaln, hypot
 cimport scipy.linalg.cython_blas as blas
 cimport scipy.linalg.cython_lapack as lapack
 cimport numpy as np
@@ -13,9 +12,10 @@ from numpy.linalg import LinAlgError
 from scipy.special import gammaln, multigammaln
 
 
-_LOG_2PI = np.log(2 * np.pi)
-_LOG_2 = np.log(2)
-_LOG_PI = np.log(np.pi)
+cdef:
+    np.float64_t _LOG_2PI = 1.8378770664093453
+    np.float64_t _LOG_2 = 0.69314718055994529
+    np.float64_t _LOG_PI = 1.1447298858494002
 
 
 cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
@@ -51,9 +51,8 @@ cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
         int nn = n*n
         np.float64_t[::1,:] l = np.empty((n,n), order='F')
 
-    with nogil:
-        blas.dcopy(&nn, &a[0,0], &inc, &l[0,0], &inc)
-        lapack.dpotrf('L', &n, &l[0,0], &n, &info)
+    blas.dcopy(&nn, &a[0,0], &inc, &l[0,0], &inc)
+    lapack.dpotrf('L', &n, &l[0,0], &n, &info)
 
     if info > 0:
         raise LinAlgError("%d-th leading minor not positive definite" % info)
@@ -67,7 +66,7 @@ cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
             for j in range(i+1,n):
                 l[i,j] = 0.0
 
-    return np.array(l, order='C')
+    return np.asarray(l, order='C')
 
 
 @cython.cdivision(True)
@@ -174,14 +173,16 @@ cpdef void _chol_downdate(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
 #             l[k,k] = rbar
 
 
-cpdef np.float64_t _chol_logdet(np.float64_t[:,::1] l):
+cpdef np.float64_t _chol_logdet(Py_ssize_t dim, np.float64_t[:,::1] l):
     """
     Return the log-determinant of a matrix given its Cholesky factor `l`.
 
     Parameters
     ----------
+    dim : int
+        Dimension of the matrix
     l : ndarray
-        Lower-triangular Cholesky factor of a matrix
+        Lower-triangular Cholesky factor of the matrix
 
     Returns
     -------
@@ -189,13 +190,19 @@ cpdef np.float64_t _chol_logdet(np.float64_t[:,::1] l):
         Log-determinant of the matrix
     """
 
-    ret = 2.0 * np.sum(np.log(np.diagonal(l)))
+    cdef:
+        Py_ssize_t i
+        np.float64_t logdet = 0.0
 
-    return ret
+    for i in range(dim):
+        logdet += clog(l[i,i])
+    logdet *= 2.0
+
+    return logdet
 
 
-# TODO: Add `np.ndarray[np.float64_t, ndim=1, mode='c']`
-cpdef _chol_solve(np.float64_t[:,::1] l, np.float64_t[::1] b):
+cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _chol_solve(
+        np.float64_t[:,::1] l, np.float64_t[::1] b):
     """
     Solve the linear equation
     ```
@@ -223,116 +230,20 @@ cpdef _chol_solve(np.float64_t[:,::1] l, np.float64_t[::1] b):
         int nrhs = 1
         np.float64_t[::1] x = np.empty((n,), order='F')
 
-    with nogil:
-        blas.dcopy(&n, &b[0], &inc, &x[0], &inc)
-        # We have to say 'U' here because of row-major ('C') order of `l`
-        lapack.dpotrs('U', &n, &nrhs, &l[0,0], &n, &x[0], &n, &info)
+    blas.dcopy(&n, &b[0], &inc, &x[0], &inc)
+    # We have to say 'U' here because of row-major ('C') order of `l`
+    lapack.dpotrs('U', &n, &nrhs, &l[0,0], &n, &x[0], &n, &info)
 
     if info != 0:
         raise ValueError('illegal value in %d-th argument of internal potrs'
                 % -info)
 
-    return np.array(x, order='C')
+    return np.asarray(x, order='C')
 
 
-# TODO: Add `np.ndarray[np.float64_t, ndim=1, mode='c']`
-cpdef _solve_triangular_vector(np.float64_t[:,::1] a, np.float64_t[::1] b):
-    """
-    Solve the equation
-    ```
-        a' x = b
-    ```
-    for `x`, assuming `a` is a lower-triangular matrix and `b` a vector.
-
-    Parameters
-    ----------
-    a : nparray
-        A lower-triangular matrix
-    b : nparray
-        Right-hand side vector
-
-    Returns
-    -------
-    x : ndarray
-        Solution
-    """
-
-    cdef:
-        int inc = 1
-        int n = a.shape[0]
-        int nrhs = 1
-        int lda = n
-        int ldx = n
-        int info = 1
-        np.float64_t[::1] x = np.empty((n,), order='F')
-
-    with nogil:
-        blas.dcopy(&n, &b[0], &inc, &x[0], &inc)
-        # We have to say 'U', 'N' here because of row-major ('C') order of
-        # `l`. Otherwise, we would say 'L', 'T'
-        lapack.dtrtrs('U', 'N', 'N', &n, &nrhs, &a[0,0], &lda, &x[0], &ldx,
-                &info)
-
-    if info > 0:
-        raise LinAlgError("singular matrix: resolution failed at diagonal %s"
-                % (info-1))
-    if info < 0:
-        raise ValueError('illegal value in %d-th argument of internal trtrs'
-                % -info)
-
-    return np.array(x, order='C')
-
-
-# TODO: Add `np.ndarray[np.float64_t, ndim=2, mode='c']`
-cpdef _solve_triangular_matrix(np.float64_t[:,::1] a, np.float64_t[:,::1] b):
-    """
-    Solve the equation
-    ```
-        a' x = b
-    ```
-    for `x`, assuming `a` is a lower-triangular matrix and `b` a matrix.
-
-    Parameters
-    ----------
-    a : nparray
-        A lower-triangular matrix
-    b : nparray
-        Right-hand side matrix
-
-    Returns
-    -------
-    x : ndarray
-        Solution
-    """
-
-    cdef:
-        int inc = 1
-        int n = a.shape[1]
-        int nrhs = b.shape[1]
-        int nnrhs = n*nrhs
-        int lda = b.shape[0]
-        int ldx = b.shape[0]
-        int info = 1
-        np.float64_t[::1,:] x = np.empty((n,n), order='F')
-
-    with nogil:
-        blas.dcopy(&nnrhs, &b[0,0], &inc, &x[0,0], &inc)
-        # We have to say 'U', 'N' here because of row-major ('C') order of
-        # `l`. Otherwise, we would say 'L', 'T'
-        lapack.dtrtrs('U', 'N', 'N', &n, &nrhs, &a[0,0], &lda, &x[0,0], &ldx,
-                &info)
-
-    if info > 0:
-        raise LinAlgError("singular matrix: resolution failed at diagonal %s"
-                % (info-1))
-    if info < 0:
-        raise ValueError('illegal value in %d-th argument of internal trtrs'
-                % -info)
-
-    return np.array(x, order='C')
-
-
-def _normal_logpdf(x, dim, mean, prec_chol, prec_logdet):
+cpdef np.float64_t _normal_logpdf(np.float64_t[::1] x, Py_ssize_t dim,
+        np.float64_t[::1] mean, np.float64_t[:,::1] prec_chol,
+        np.float64_t prec_logdet):
     """
     Logarithm of the multivariate normal probability density function.
 
@@ -356,18 +267,29 @@ def _normal_logpdf(x, dim, mean, prec_chol, prec_logdet):
         Logarithm of the probability density function evaluated at `x`
     """
 
+    cdef:
+        Py_ssize_t i, j
+        int n = dim
+        int inc = 1
+        np.float64_t alpha = -1.0
+        np.float64_t[::1] dev = np.empty((dim,), order='F')
+        np.float64_t inner, maha = 0.0
+
     # Compute the squared Mahalanobis distance
     #     (x - mean)' prec (x - mean)
-    dev = x - mean
-    # TODO: Use only the lower triangular part
-    maha = np.sum(np.square(np.dot(dev, prec_chol)), axis=-1)
+    blas.dcopy(&n, &x[0], &inc, &dev[0], &inc)
+    blas.daxpy(&n, &alpha, &mean[0], &inc, &dev[0], &inc)
+    for j in range(dim):
+        inner = 0.0
+        for i in range(j,dim):
+            inner += dev[i] * prec_chol[i, j]
+        maha += inner*inner
 
-    ret = -0.5 * (dim * _LOG_2PI - prec_logdet + maha)
-
-    return ret
+    return -0.5 * (dim * _LOG_2PI - prec_logdet + maha)
 
 
-def _normal_rvs(dim, mean, prec_chol, random_state):
+cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _normal_rvs(Py_ssize_t dim,
+        np.float64_t[::1] mean, np.float64_t[:,::1] prec_chol, random_state):
     """
     Draw a random sample from a multivariate normal distribution.
 
@@ -389,14 +311,38 @@ def _normal_rvs(dim, mean, prec_chol, random_state):
         mean vector and the precision matrix
     """
 
-    x = random_state.normal(loc=0.0, scale=1.0, size=dim)
-    x = _solve_triangular_vector(prec_chol, x)
-    x += mean
+    cdef:
+        Py_ssize_t i
+        int n = dim
+        int nrhs = 1
+        int lda = dim
+        int ldx = dim
+        int info = 1
+        np.float64_t[::1] x = random_state.normal(loc=0.0, scale=1.0,
+                size=dim)
 
-    return x
+    # We have to say 'U', 'N' here because of row-major ('C') order of
+    # `prec_chol`. Otherwise, we would say 'L', 'T'
+    lapack.dtrtrs('U', 'N', 'N', &n, &nrhs, &prec_chol[0,0], &lda, &x[0],
+            &ldx, &info)
+
+    if info > 0:
+        raise LinAlgError("singular matrix: resolution failed at diagonal %s"
+                % (info-1))
+    if info < 0:
+        raise ValueError('illegal value in %d-th argument of internal trtrs'
+                % -info)
+
+    for i in range(dim):
+        x[i] += mean[i]
+
+    return np.asarray(x, order='C')
 
 
-def _t_logpdf(x, dim, loc, df, scale_chol, scale_logdet):
+@cython.cdivision(True)
+cpdef np.float64_t _t_logpdf(np.float64_t[::1] x, Py_ssize_t dim,
+        np.float64_t[::1] loc, np.float64_t df,
+        np.float64_t[:,::1] scale_chol, np.float64_t scale_logdet):
     """
     Logarithm of the multivariate t probability density function.
 
@@ -422,21 +368,45 @@ def _t_logpdf(x, dim, loc, df, scale_chol, scale_logdet):
         Logarithm of the probability density function evaluated at `x`
     """
 
+    cdef:
+        Py_ssize_t i
+        int info
+        int n = dim
+        int nrhs = 1
+        int lda = dim
+        int inc = 1
+        np.float64_t alpha = -1.0
+        np.float64_t logpdf, maha = 0.0
+        np.float64_t[::1] dev = np.empty((dim,), order='F')
+
     # Compute the squared Mahalanobis distance
     #     (x - loc)' scale^(-1) (x - loc)
-    diff = (x - loc).T
-    chol_solved = _chol_solve(scale_chol, diff)
-    maha = np.sum(diff * chol_solved, axis=0).reshape(-1,1).squeeze()
+    blas.dcopy(&n, &x[0], &inc, &dev[0], &inc)
+    blas.daxpy(&n, &alpha, &loc[0], &inc, &dev[0], &inc)
+    # We have to say 'U', 'T' here because of row-major ('C') order of
+    # `invscale_chol`. Otherwise, we would say 'L', 'N'
+    lapack.dtrtrs('U', 'T', 'N', &n, &nrhs, &scale_chol[0,0], &lda, &dev[0],
+            &lda, &info)
+    if info > 0:
+        raise LinAlgError("singular matrix: resolution failed at diagonal %s"
+                % (info-1))
+    if info < 0:
+        raise ValueError('illegal value in %d-th argument of internal trtrs'
+                % -info)
+    for i in range(dim):
+        maha += dev[i]*dev[i]
 
-    ret = -0.5 * dim *(np.log(df) + _LOG_PI)
-    ret += gammaln(0.5 * (df + dim)) - gammaln(0.5 * df)
-    ret -= 0.5 * scale_logdet
-    ret -= 0.5 * (df + dim) * np.log(1.0 + maha / df)
+    logpdf = -0.5 * (dim * (clog(df) + _LOG_PI) + scale_logdet +
+            (df + dim) * clog(1.0 + maha / df)) - cgammaln(0.5 * df) + \
+            cgammaln(0.5 * (df + dim))
 
-    return ret
+    return logpdf
 
 
-def _t_rvs(dim, loc, df, scale_chol, random_state):
+@cython.cdivision(True)
+cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _t_rvs(Py_ssize_t dim,
+        np.float64_t[::1] loc, np.float64_t df,
+        np.float64_t[:,::1] scale_chol, random_state):
     """
     Draw a sample from a multivariate t distribution.
 
@@ -455,22 +425,33 @@ def _t_rvs(dim, loc, df, scale_chol, random_state):
 
     Returns
     -------
-    rvs : ndarray or scalar
+    rvs : ndarray
         Random variate of size `dim`, where `dim` is the dimension of the
         location vector and the scale matrix
     """
 
-    g = random_state.gamma(df/2., 2./df)
-    norm = random_state.normal(size=dim)
+    cdef:
+        Py_ssize_t i
+        int inc = 1
+        int n = dim
+        int lda = dim
+        np.float64_t sqrtg = csqrt(random_state.gamma(df/2., 2./df))
+        np.float64_t[::1] x = random_state.normal(size=dim)
 
-    Z = np.dot(scale_chol, norm)
-    x = loc + Z / np.sqrt(g)
+    # We have to say 'U', 'T' here because of row-major ('C') order of
+    # `scale_chol`. Otherwise, we would say 'L', 'N'
+    blas.dtrmv('U', 'T', 'N', &n, &scale_chol[0,0], &lda, &x[0], &inc)
 
-    return x
+    # Cannot use daxpy here, because that would overwrite `loc`
+    for i in range(dim):
+        x[i] = loc[i] + x[i] / sqrtg
+
+    return np.asarray(x, order='C')
 
 
-def _wishart_logpdf(x_chol, x_logdet, dim, df, invscale_chol,
-        invscale_logdet):
+cpdef np.float64_t _wishart_logpdf(np.float64_t[:,:] x_chol,
+        np.float64_t x_logdet, Py_ssize_t dim, np.float64_t df,
+        np.float64_t[:,:] invscale_chol, np.float64_t invscale_logdet):
     """
     Logarithm of the Wishart probability density function.
 
@@ -484,7 +465,7 @@ def _wishart_logpdf(x_chol, x_logdet, dim, df, invscale_chol,
         the probability density function
     dim : int
         Dimension of `x` and `scale`
-    df : int
+    df : float
         Degrees of freedom
     invscale_chol : ndarray
         Lower triangular Cholesky factor of the inverse scale matrix
@@ -497,20 +478,28 @@ def _wishart_logpdf(x_chol, x_logdet, dim, df, invscale_chol,
         Logarithm of the probability density function evaluated at `x`
     """
 
-    # Compute Tr[scale^(-1) x]
-    # TODO: Make better use of lower triangular shapes
-    invscale_x_tr = np.sum(np.square(np.dot(invscale_chol.T, x_chol)))
+    cdef:
+        Py_ssize_t i, j, k
+        np.float64_t inner, ret
+        np.float64_t invscale_x_tr = 0.0
 
-    ret = 0.5 * (df - dim - 1) * x_logdet
-    ret -= 0.5 * invscale_x_tr
-    ret -= 0.5 * df * dim * _LOG_2
-    ret += 0.5 * df * invscale_logdet
-    ret -= multigammaln(0.5 * df, dim)
+    # Compute Tr[scale^(-1) x]
+    for i in range(dim):
+        for j in range(dim):
+            inner = 0.0
+            for k in range(max(i,j), dim):
+                inner += invscale_chol[k, i] * x_chol[k, j]
+            invscale_x_tr += inner*inner
+
+    ret = 0.5 * ((df - dim - 1) * x_logdet - invscale_x_tr + \
+            df * (invscale_logdet - dim * _LOG_2)) - \
+            multigammaln(0.5 * df, dim)
 
     return ret
 
 
-def _wishart_rvs(dim, df, invscale_chol, random_state):
+cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _wishart_rvs(Py_ssize_t dim,
+        np.float64_t df, np.float64_t[:,::1] invscale_chol, random_state):
     """
     Draw a random sample from a Wishart distribution.
 
@@ -518,7 +507,7 @@ def _wishart_rvs(dim, df, invscale_chol, random_state):
     ----------
     dim : int
         Dimension of the inverse scale matrix
-    df : int
+    df : float
         Degrees of freedom
     invscale_chol : ndarray
         Lower triangular Cholesky factor of the inverse scale matrix
@@ -532,20 +521,40 @@ def _wishart_rvs(dim, df, invscale_chol, random_state):
         of the scale matrix
     """
 
-    a = np.zeros((dim, dim))
+    cdef:
+        Py_ssize_t i, j
+        np.float64_t[::1,:] a = np.empty((dim,dim), order='F')
+        np.float64_t[::1,:] x = np.empty((dim,dim), order='F')
+        int info
+        int n = dim
+        int nrhs = dim
+        int k = dim
+        np.float64_t alpha = 1.0
+        int lda = dim
+        np.float64_t beta = 0.0
 
-    n_tril = dim * (dim-1) // 2
-    covariances = random_state.normal(size=n_tril).reshape((n_tril,))
-    tril_idx = np.tril_indices(dim, k=-1)
-    a[tril_idx] = covariances
+    for i in range(dim):
+        for j in range(0,i):
+            a[i,j] = random_state.normal()
+            a[j,i] = 0.0
+        a[i,i] = csqrt(random_state.chisquare(df-(i+1)+1))
 
-    diag_idx = np.diag_indices(dim)
-    variances = np.array([random_state.chisquare(df-(i+1)+1)**0.5
-            for i in range(dim)])
-    a[diag_idx] = variances
+    # We have to say 'U', 'N' here because of row-major ('C') order of
+    # `invscale_chol`. Otherwise, we would say 'L', 'T'
+    lapack.dtrtrs('U', 'N', 'N', &n, &nrhs, &invscale_chol[0,0], &lda,
+            &a[0,0], &lda, &info)
 
-    a = _solve_triangular_matrix(invscale_chol, a)
+    if info > 0:
+        raise LinAlgError("singular matrix: resolution failed at diagonal %s"
+                % (info-1))
+    if info < 0:
+        raise ValueError('illegal value in %d-th argument of internal trtrs'
+                % -info)
 
-    a = np.dot(a, a.T)
+    blas.dsyrk('L', 'N', &n, &k, &alpha, &a[0,0], &lda, &beta, &x[0,0], &n)
 
-    return a
+    for i in range(dim):
+        for j in range(0,i):
+            x[j,i] = x[i,j]
+
+    return np.asarray(x, order='C')
