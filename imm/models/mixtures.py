@@ -96,7 +96,7 @@ class ConjugateGaussianMixture(GenericMixture):
         self.dim, self.xi, self.rho, self.beta, self.W = \
                 self._check_parameters(None, xi, rho, beta, W)
         self._rho_xi = self.rho * self.xi
-        self._beta_W_chol = _chol(self.beta*self.W)
+        self._beta_W_chol = _chol(self.dim, self.beta*self.W)
 
     @staticmethod
     def _check_parameters(dim, xi, rho, beta, W):
@@ -227,7 +227,7 @@ class ConjugateGaussianMixture(GenericMixture):
                 mm = self._mixture_model
                 S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
                         self._random_state)
-                S_c_chol = _chol(S_c)
+                S_c_chol = _chol(mm.dim, S_c)
                 self._S_c = (S_c, S_c_chol)
             return self._S_c
 
@@ -457,8 +457,8 @@ class NonconjugateGaussianMixture(GenericMixture):
                 self._check_parameters(None, xi, R, beta, W)
 
         self._R_xi = np.dot(self.R, self.xi)
-        self._R_chol = _chol(self.R)
-        self._beta_W_chol = _chol(self.beta * self.W)
+        self._R_chol = _chol(self.dim, self.R)
+        self._beta_W_chol = _chol(self.dim, self.beta * self.W)
 
     @staticmethod
     def _check_parameters(dim, xi, R, beta, W):
@@ -630,7 +630,7 @@ class NonconjugateGaussianMixture(GenericMixture):
 
                 S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
                         self._random_state)
-                S_c_chol = _chol(S_c)
+                S_c_chol = _chol(mm.dim, S_c)
                 S_c_logdet = _chol_logdet(mm.dim, S_c_chol)
 
                 self._S_c = (S_c, S_c_chol, S_c_logdet)
@@ -720,14 +720,14 @@ class NonconjugateGaussianMixture(GenericMixture):
             return self._mu_c
 
         @staticmethod
-        def _prepare_mu_c(n_c, xsum_c, S_c, R, R_chol, xi, R_xi):
+        def _prepare_mu_c(dim, n_c, xsum_c, S_c, R, R_chol, xi, R_xi):
 
             if n_c > 0:
                 if S_c is None:
                     raise ValueError
                 S_c, _, _ = S_c
-                R_c_chol = _chol(R + n_c*S_c)
-                xi_c = _chol_solve(R_c_chol, np.dot(S_c, xsum_c) + R_xi)
+                R_c_chol = _chol(dim, R + n_c*S_c)
+                xi_c = _chol_solve(dim, R_c_chol, np.dot(S_c, xsum_c) + R_xi)
             else:
                 R_c_chol = R_chol
                 xi_c = xi
@@ -746,8 +746,8 @@ class NonconjugateGaussianMixture(GenericMixture):
         def _draw_mu_c(cls, dim, n_c, xsum_c, S_c, R, R_chol, xi, R_xi,
                 random_state, compute_log_likelihood=False):
 
-            R_c_chol, xi_c = cls._prepare_mu_c(n_c, xsum_c, S_c, R, R_chol,
-                    xi, R_xi)
+            R_c_chol, xi_c = cls._prepare_mu_c(dim, n_c, xsum_c, S_c, R,
+                    R_chol, xi, R_xi)
 
             mu_c = _normal_rvs(dim, xi_c, R_c_chol, random_state)
 
@@ -799,7 +799,7 @@ class NonconjugateGaussianMixture(GenericMixture):
                     xsum_c, mu_c)
 
             S_c = _wishart_rvs(dim, beta_c, beta_W_c_chol, random_state)
-            S_c_chol = _chol(S_c)
+            S_c_chol = _chol(dim, S_c)
             S_c_logdet = _chol_logdet(dim, S_c_chol)
 
             log_likelihood = 0.0
@@ -905,8 +905,9 @@ class NonconjugateGaussianMixture(GenericMixture):
             self._mu_c = mixture_param._mu_c
 
             if compute_log_likelihood:
-                R_c_chol, xi_c = self._prepare_mu_c(self.n_c, self.xsum_c,
-                        self._S_c, mm.R, mm._R_chol, mm.xi, mm._R_xi)
+                R_c_chol, xi_c = self._prepare_mu_c(dim, self.n_c,
+                        self.xsum_c, self._S_c, mm.R, mm._R_chol, mm.xi,
+                        mm._R_xi)
                 log_likelihood += self._log_likelihood_mu_c(dim, R_c_chol,
                         xi_c, self._mu_c)
 

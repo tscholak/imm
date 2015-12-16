@@ -18,8 +18,8 @@ cdef:
     np.float64_t _LOG_PI = 1.1447298858494002
 
 
-cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
-        bool clean=True):
+cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(Py_ssize_t dim,
+        np.float64_t[:,::1] a, bool clean=False):
     """
     Return the Cholesky decomposition,
     ```
@@ -45,11 +45,11 @@ cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
     """
 
     cdef:
-        int i, j, info
-        int inc = 1
-        int n = a.shape[0]
+        Py_ssize_t i, j
+        int info, inc = 1
+        int n = dim
         int nn = n*n
-        np.float64_t[::1,:] l = np.empty((n,n), order='F')
+        np.float64_t[::1,:] l = np.empty((dim,dim), order='F')
 
     blas.dcopy(&nn, &a[0,0], &inc, &l[0,0], &inc)
     lapack.dpotrf('L', &n, &l[0,0], &n, &info)
@@ -62,15 +62,16 @@ cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(np.float64_t[:,::1] a,
                 % -info)
 
     if clean:
-        for i in range(n):
-            for j in range(i+1,n):
+        for i in range(dim):
+            for j in range(i+1,dim):
                 l[i,j] = 0.0
 
     return np.asarray(l, order='C')
 
 
 @cython.cdivision(True)
-cpdef void _chol_update(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
+cpdef void _chol_update(Py_ssize_t dim, np.float64_t[:,::1] l,
+        np.float64_t[::1] x):
     """
     Update the lower triangular Cholesky factor `l` with the rank-1 addition
     implied by `x` such that:
@@ -90,18 +91,18 @@ cpdef void _chol_update(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
     """
 
     cdef:
-        int i, j
+        Py_ssize_t i, j
         np.float64_t r, c, s
 
     with nogil:
         for j in range(dim):
-            r = hypot(l[j, j], x[j])
-            c = r / l[j, j]
-            s = x[j] / l[j, j]
-            l[j, j] = r
+            r = hypot(l[j,j], x[j])
+            c = r / l[j,j]
+            s = x[j] / l[j,j]
+            l[j,j] = r
             for i in range(j+1, dim):
-                l[i, j] = (l[i, j] + s*x[i]) / c
-                x[i] = c*x[i] - s*l[i, j]
+                l[i,j] = (l[i,j] + s*x[i]) / c
+                x[i] = c*x[i] - s*l[i,j]
 
 
 # TODO: Revisit
@@ -121,7 +122,8 @@ cpdef void _chol_update(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
 
 
 @cython.cdivision(True)
-cpdef void _chol_downdate(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
+cpdef void _chol_downdate(Py_ssize_t dim, np.float64_t[:,::1] l,
+        np.float64_t[::1] x):
     """
     Downdate the lower triangular Cholesky factor `l` with the rank-1
     subtraction implied by `x` such that
@@ -141,18 +143,18 @@ cpdef void _chol_downdate(int dim, np.float64_t[:,::1] l, np.float64_t[::1] x):
     """
 
     cdef:
-        int i, j
+        Py_ssize_t i, j
         np.float64_t r, c, s
 
     with nogil:
         for j in range(dim):
-            r = csqrt((l[j, j] - x[j]) * (l[j, j] + x[j]))
-            c = r / l[j, j]
-            s = x[j] / l[j, j]
-            l[j, j] = r
+            r = csqrt((l[j,j] - x[j]) * (l[j,j] + x[j]))
+            c = r / l[j,j]
+            s = x[j] / l[j,j]
+            l[j,j] = r
             for i in range(j+1, dim):
-                l[i, j] = (l[i, j] - s*x[i]) / c
-                x[i] = c*x[i] - s*l[i, j]
+                l[i,j] = (l[i,j] - s*x[i]) / c
+                x[i] = c*x[i] - s*l[i,j]
 
 
 # TODO: Revisit
@@ -201,7 +203,7 @@ cpdef np.float64_t _chol_logdet(Py_ssize_t dim, np.float64_t[:,::1] l):
     return logdet
 
 
-cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _chol_solve(
+cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _chol_solve(Py_ssize_t dim,
         np.float64_t[:,::1] l, np.float64_t[::1] b):
     """
     Solve the linear equation
@@ -226,9 +228,9 @@ cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _chol_solve(
 
     cdef:
         int info, inc = 1
-        int n = l.shape[0]
+        int n = dim
         int nrhs = 1
-        np.float64_t[::1] x = np.empty((n,), order='F')
+        np.float64_t[::1] x = np.empty((dim,), order='F')
 
     blas.dcopy(&n, &b[0], &inc, &x[0], &inc)
     # We have to say 'U' here because of row-major ('C') order of `l`
