@@ -67,7 +67,7 @@ The result, `c_n_sams`, is very similar to the original set of labels, `c_n`:
 Each of the 500 iterations produces a set of labels. This process can be
 visualized as an animation:
 
-<iframe width="420" height="315" src="https://www.youtube.com/embed/YUiBs8Y7ihk" frameborder="0" allowfullscreen></iframe>
+[![click to play](https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams_clicktoplay.png)](https://youtu.be/YUiBs8Y7ihk)
 
 The algorithm manages to find most of the clusters already in the first couple
 of iterations. The noisy switching of some of the labels demonstrates the
