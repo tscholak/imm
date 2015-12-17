@@ -55,7 +55,7 @@ This will generate data of the following form:
 Now we will try to infer the labels from the data:
 
 ```python
-s = imm.samplers.CollapsedSAMSSampler(pm, max_iter=100, warmup=0)
+s = imm.samplers.CollapsedSAMSSampler(pm, max_iter=500, warmup=0)
 
 c_n_sams, _ = pm.infer(x_n, sampler=s)
 ```
