@@ -51,7 +51,7 @@ Google Chrome to view the WebM content.
 
 This will generate a data of the following form:
 
-.. figure:: https://raw.github.com/tscholak/imm/master/DPGMM.png
+.. figure:: https://raw.githubusercontent.com/tscholak/imm/master/dpgmm.png
    :alt: DP example
    :align: center
 
@@ -65,14 +65,14 @@ Now we will try to infer the labels from the data:
 
 This is the result:
 
-.. figure:: https://raw.github.com/tscholak/imm/master/DPGMM_sams.png
+.. figure:: https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.png
    :alt: DP example
    :align: center
 
 Or, as video:
 
 <video controls>
-    <source src="data:video/x-webm;base64,https://raw.github.com/tscholak/imm/master/DPGMM_sams.webm" type="video/webm">
+    <source src="data:video/x-webm;base64,https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm">
     Your browser does not support the video tag.
 </video>
 
