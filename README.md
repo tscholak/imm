@@ -32,8 +32,7 @@ installations.
 First steps
 -----------
 
-Below I demonstrate how to address a simple inference problem in imm. Use
-Chrome, Firefox, or Opera to view the WebM content.
+Below I demonstrate how to address a simple inference problem in imm.
 
 ```python
 import imm
@@ -44,12 +43,12 @@ mm = imm.models.ConjugateGaussianMixture(
     beta=2.5,
     W=[[1.5,.5],[.5,1.5]])
 
-pm = imm.models.DP(mm, alpha=.75, seed=1)
+pm = imm.models.DP(mm, alpha=1.25, seed=1)
 
-x_n, c_n = pm.draw(size=1000)
+x_n, c_n = pm.draw(size=2000)
 ```
 
-This will generate a data of the following form:
+This will generate data of the following form:
 
 ![DP example](https://raw.githubusercontent.com/tscholak/imm/master/dpgmm.png "Sample from a Dirichlet process Gaussian mixture model")
 
@@ -61,16 +60,19 @@ s = imm.samplers.CollapsedSAMSSampler(pm, max_iter=100, warmup=0)
 c_n_sams, _ = pm.infer(x_n, sampler=s)
 ```
 
-This is the result:
+The result, `c_n_sams`, is very similar to the original set of labels, `c_n`:
 
 ![SAMS example](https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.png "Output of the SAMS sampler")
 
-Or, as video:
+Each of the 500 iterations produces a set of labels. This process can be
+visualized as an animation:
 
-<video controls="controls" preload="none">
-    <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm" />
-    https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm
-</video>
+<iframe width="420" height="315" src="https://www.youtube.com/embed/YUiBs8Y7ihk" frameborder="0" allowfullscreen></iframe>
+
+The algorithm manages to find most of the clusters already in the first couple
+of iterations. The noisy switching of some of the labels demonstrates the
+remaining uncertainty of the model predictions, which is inherent to the
+Bayesian approach.
 
 Acknowledgments, credits, and contact info
 ------------------------------------------
