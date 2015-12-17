@@ -67,10 +67,12 @@ This is the result:
 
 Or, as video:
 
-<video controls="controls" preload="none">
-    <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm" />
-    Your browser does not support the video tag.
-</video>
+<div>
+    <video controls="controls" preload="none">
+        <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm" />
+        Your browser does not support the video tag.
+    </video>
+</div>
 
 Acknowledgments, credits, and contact info
 ------------------------------------------
