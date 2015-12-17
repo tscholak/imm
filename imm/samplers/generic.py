@@ -3,8 +3,8 @@
 import abc
 import numpy as np
 from collections import defaultdict
-from scipy.misc import logsumexp
 
+from ..utils import _logsumexp
 from ..models.processes import GenericProcess
 from ..models.mixtures import GenericMixture
 
@@ -293,7 +293,9 @@ class GenericGibbsSampler(GenericSampler):
                         mixture_params[k].log_likelihood(x_n[i])
 
             # Sample from log_dist. Normalization is required
-            log_dist -= logsumexp(log_dist)
+            log_dist -= _logsumexp(len(n_c), log_dist)
+            # TODO: Can we expect performance improvements if we exclude those
+            #       elements of `log_dist` that are -inf?
             next_k = random_state.choice(a=len(n_c), p=np.exp(log_dist))
 
             c_n[i] = next_k
@@ -843,7 +845,7 @@ class GenericRGMSSampler(GenericMSSampler):
                             1) + launch.mixture_param.log_likelihood(x_n[l])
 
                 # Normalization
-                log_dist -= logsumexp(log_dist)
+                log_dist -= _logsumexp(2, log_dist)
 
                 if scan == max_intermediate_scans_split:
                     # The last iteration of restricted Gibbs sampling leads to
@@ -1098,7 +1100,7 @@ class GenericSAMSSampler(GenericMSSampler):
                         + launch.mixture_param.log_likelihood(x_n[l])
 
             # Normalization
-            log_dist -= logsumexp(log_dist)
+            log_dist -= _logsumexp(2, log_dist)
 
             if c_n[i] == c_n[j]:
                 # This is a split and there won't be a merge proposal

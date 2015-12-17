@@ -1,21 +1,56 @@
-# -*- coding: utf-8 -*-
 # cython: boundscheck = False, nonecheck = False, wraparound = False
 
 cimport cython
 from cpython cimport bool
-from libc.math cimport log as clog, sqrt as csqrt, lgamma as cgammaln, hypot
+from libc.math cimport (log as clog, sqrt as csqrt, lgamma as cgammaln, hypot,
+        exp as cexp)
+from numpy.math cimport INFINITY
 cimport scipy.linalg.cython_blas as blas
 cimport scipy.linalg.cython_lapack as lapack
 cimport numpy as np
 import numpy as np
 from numpy.linalg import LinAlgError
-from scipy.special import gammaln, multigammaln
+from scipy.special import multigammaln
 
 
 cdef:
     np.float64_t _LOG_2PI = 1.8378770664093453
     np.float64_t _LOG_2 = 0.69314718055994529
     np.float64_t _LOG_PI = 1.1447298858494002
+
+
+cpdef np.float64_t _logsumexp(Py_ssize_t dim, np.float64_t[::1] a):
+    """
+    Compute the logarithm of the sum of exponentials of input elements.
+
+    Parameters
+    ----------
+    dim : int
+        Dimension of input vector
+    a : ndarray
+        Input vector
+
+    Returns
+    -------
+    res : float
+        The result
+    """
+
+    cdef:
+        Py_ssize_t i
+        np.float64_t res = 0.0
+        np.float64_t a_max = -INFINITY
+
+    for i in range(dim):
+        if a[i] > a_max:
+            a_max = a[i]
+
+    for i in range(dim):
+        res += cexp(a[i] - a_max)
+
+    res = a_max + clog(res)
+
+    return res
 
 
 cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(Py_ssize_t dim,
@@ -33,6 +68,8 @@ cpdef np.ndarray[np.float64_t, ndim=2, mode='c'] _chol(Py_ssize_t dim,
 
     Parameters
     ----------
+    dim : int
+        Dimension of input matrix
     a : ndarray
         Matrix to be decomposed
     clean : boolean, optional
@@ -215,6 +252,8 @@ cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _chol_solve(Py_ssize_t dim,
 
     Parameters
     ----------
+    dim : int
+        Dimension of the Cholesky factor and the right-hand side vector
     l : ndarray
         Lower triangular Cholesky factor
     b : ndarray
@@ -287,7 +326,7 @@ cpdef np.float64_t _normal_logpdf(np.float64_t[::1] x, Py_ssize_t dim,
             inner += dev[i] * prec_chol[i, j]
         maha += inner*inner
 
-    return -0.5 * (dim * _LOG_2PI - prec_logdet + maha)
+    return -0.5 * (<np.float64_t>dim * _LOG_2PI - prec_logdet + maha)
 
 
 cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _normal_rvs(Py_ssize_t dim,
@@ -398,9 +437,9 @@ cpdef np.float64_t _t_logpdf(np.float64_t[::1] x, Py_ssize_t dim,
     for i in range(dim):
         maha += dev[i]*dev[i]
 
-    logpdf = -0.5 * (dim * (clog(df) + _LOG_PI) + scale_logdet +
-            (df + dim) * clog(1.0 + maha / df)) - cgammaln(0.5 * df) + \
-            cgammaln(0.5 * (df + dim))
+    logpdf = -0.5 * (<np.float64_t>dim * (clog(df) + _LOG_PI) + scale_logdet +
+            (df + <np.float64_t>dim) * clog(1.0 + maha / df)) - \
+            cgammaln(0.5 * df) + cgammaln(0.5 * (df + <np.float64_t>dim))
 
     return logpdf
 
@@ -437,7 +476,7 @@ cpdef np.ndarray[np.float64_t, ndim=1, mode='c'] _t_rvs(Py_ssize_t dim,
         int inc = 1
         int n = dim
         int lda = dim
-        np.float64_t sqrtg = csqrt(random_state.gamma(df/2., 2./df))
+        np.float64_t sqrtg = csqrt(random_state.gamma(df/2.0, 2.0/df))
         np.float64_t[::1] x = random_state.normal(size=dim)
 
     # We have to say 'U', 'T' here because of row-major ('C') order of
@@ -483,7 +522,7 @@ cpdef np.float64_t _wishart_logpdf(np.float64_t[:,:] x_chol,
     cdef:
         Py_ssize_t i, j, k
         np.float64_t inner, ret
-        np.float64_t invscale_x_tr = 0.0
+        np.float64_t invscalex_tr = 0.0
 
     # Compute Tr[scale^(-1) x]
     for i in range(dim):
@@ -491,11 +530,12 @@ cpdef np.float64_t _wishart_logpdf(np.float64_t[:,:] x_chol,
             inner = 0.0
             for k in range(max(i,j), dim):
                 inner += invscale_chol[k, i] * x_chol[k, j]
-            invscale_x_tr += inner*inner
+            invscalex_tr += inner*inner
 
-    ret = 0.5 * ((df - dim - 1) * x_logdet - invscale_x_tr + \
-            df * (invscale_logdet - dim * _LOG_2)) - \
-            multigammaln(0.5 * df, dim)
+    ret = (df - <np.float64_t>dim - 1.0) * x_logdet - invscalex_tr + \
+            df * (invscale_logdet - <np.float64_t>dim * _LOG_2)
+    ret *= 0.5
+    ret -= multigammaln(0.5 * df, <np.float64_t>dim)
 
     return ret
 

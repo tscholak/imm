@@ -2,11 +2,13 @@
 
 import abc
 import numpy as np
-from scipy.misc import factorial, logsumexp
+from scipy.misc import factorial
 from scipy.special import poch, gammaln
 from scipy.stats import poisson
 from scipy._lib._util import check_random_state
 from scipy.stats._multivariate import _squeeze_output
+
+from ..utils import _logsumexp
 
 
 class GenericProcess(object):
@@ -214,7 +216,7 @@ class GenericProcess(object):
                     log_dist[k] = process_param.log_prior(i+1, n_c[k])
 
                 # Sample from log_dist. Normalization is required
-                log_dist -= logsumexp(log_dist)
+                log_dist -= _logsumexp(c_max, log_dist)
                 next_k = random_state.choice(a=c_max, p=np.exp(log_dist))
 
                 # cdf = np.cumsum(np.exp(log_dist - log_dist.max()))
@@ -503,7 +505,7 @@ class MFM(GenericProcess):
                             gammaln(1.0+(k+s)*gamma)
                     if ret[k] < comp:
                         break
-                ret = s*gamma*np.log(n) + logsumexp(ret[:k+1])
+                ret = s*gamma*np.log(n) + _logsumexp(k+1, ret[:k+1])
                 return ret
 
             ret = help(t) - help(tp)
