@@ -35,44 +35,40 @@ First steps
 Below I demonstrate how to address a simple inference problem in imm. Use
 Google Chrome to view the WebM content.
 
-.. code-block:: python
+```python
+import imm
 
-    import imm
+mm = imm.models.ConjugateGaussianMixture(
+    xi=[0.,0.],
+    rho=.1,
+    beta=2.5,
+    W=[[1.5,.5],[.5,1.5]])
 
-    mm = imm.models.ConjugateGaussianMixture(
-        xi=[0.,0.],
-        rho=.1,
-        beta=2.5,
-        W=[[1.5,.5],[.5,1.5]])
+pm = imm.models.DP(mm, alpha=.75, seed=1)
 
-    pm = imm.models.DP(mm, alpha=.75, seed=1)
-
-    x_n, c_n = pm.draw(size=1000)
+x_n, c_n = pm.draw(size=1000)
+```
 
 This will generate a data of the following form:
 
-.. figure:: https://raw.githubusercontent.com/tscholak/imm/master/dpgmm.png
-   :alt: DP example
-   :align: center
+![DP example](https://raw.githubusercontent.com/tscholak/imm/master/dpgmm.png "Sample from a Dirichlet process Gaussian mixture model")
 
 Now we will try to infer the labels from the data:
 
-.. code-block:: python
+```python
+s = imm.samplers.CollapsedSAMSSampler(pm, max_iter=100, warmup=0)
 
-    s = imm.samplers.CollapsedSAMSSampler(pm, max_iter=100, warmup=0)
-
-    c_n_sams, _ = pm.infer(x_n, sampler=s)
+c_n_sams, _ = pm.infer(x_n, sampler=s)
+```
 
 This is the result:
 
-.. figure:: https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.png
-   :alt: DP example
-   :align: center
+![SAMS example](https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.png "Output of the SAMS sampler")
 
 Or, as video:
 
 <video controls>
-    <source src="data:video/x-webm;base64,https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm">
+    <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm">
     Your browser does not support the video tag.
 </video>
 
