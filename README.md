@@ -1,6 +1,7 @@
-# imm
+imm
+===
 
-imm is a Python package for Bayesian MCMC inference for infinite mixture
+imm is a Python package for Bayesian MCMC inference in infinite mixture
 models. It is partially implemented in Cython for speed.
 
 imm's main purpose is the clustering of multidimensional data in cases in
@@ -8,15 +9,19 @@ which the number of clusters is not exactly known.
 
 Currently, imm supports the following nonparametric models:
 
-- the Dirichlet process (DP) mixture model and
-- the mixture of finite mixtures (MFM) model.
+* the Dirichlet process (DP) mixture model and
+* the mixture of finite mixtures (MFM) model.
 
 The base measure can be either
 
-- a multivariate normal distribution with a conjugate normal-Wishart prior or
-- a multivariate normal with a conditionally conjugate normal-Wishart prior.
+* a multivariate normal distribution with a conjugate normal-Wishart prior or
+* a multivariate normal with a conditionally conjugate normal-Wishart prior.
 
-## Getting started
+I will release proper documentation eventually. For now, have a look at the
+tutorial section below.
+
+Getting started
+---------------
 
 <!-- To install the latest version from PyPI, call `sudo pip install imm`. -->
 
@@ -24,7 +29,8 @@ To install imm manually from the GitHub repository, clone it and do
 `python setup.py install --user`. Required are recent Cython and SciPy
 installations.
 
-## First steps
+First steps
+-----------
 
 Below I demonstrate how to address a simple inference problem in imm. Use
 Google Chrome to view the WebM content.
@@ -70,13 +76,16 @@ Or, as video:
     Your browser does not support the video tag.
 </video>
 
-## Acknowledgments
+Acknowledgments, credits, and contact info
+------------------------------------------
 
 Credit goes to Hanna Wallach (UMass Amherst), whose
 [DPMM project](https://github.com/hannawallach/dpmm) laid the foundation for
 the present code. The unified approach, the application to (conditionally)
 conjugate Gaussian mixture models, the mixture of finite mixtures model,
-and the SAMS sampler is my doing. Although the code underwent and continues to
+and the SAMS sampler is my doing.
+
+Although the code underwent and continues to
 undergo significant testing, please understand that I cannot give a guarantee
 that it is correct or will produce correct results. If you find an error,
 open an issue or drop me an email at <torsten.scholak@googlemail.com>.
