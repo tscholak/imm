@@ -33,7 +33,7 @@ First steps
 -----------
 
 Below I demonstrate how to address a simple inference problem in imm. Use
-Google Chrome to view the WebM content.
+Chrome, Firefox, or Opera to view the WebM content.
 
 ```python
 import imm
@@ -67,8 +67,8 @@ This is the result:
 
 Or, as video:
 
-<video controls>
-    <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm">
+<video controls="controls" preload="none">
+    <source src="https://raw.githubusercontent.com/tscholak/imm/master/dpgmm_sams.webm" type="video/webm" />
     Your browser does not support the video tag.
 </video>
 
