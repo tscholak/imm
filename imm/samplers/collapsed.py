@@ -8,7 +8,7 @@ import numpy as np
 
 from .generic import (GenericGibbsSampler, GenericRGMSSampler,
         GenericSAMSSampler)
-from ..models import ConjugateGaussianMixture
+from ..models import CollapsedConjugateGaussianMixture
 from ..models import DP, MFM
 
 
@@ -35,11 +35,17 @@ class CollapsedGibbsSampler(GenericGibbsSampler):
         results of all iterations until this many iterations have elapsed.
         This must be non-negative and smaller than max_iter. Default is
         max_iter / 2
+
+    References
+    ----------
+    Neal, R. M. (2000). Markov chain sampling methods for Dirichlet process
+        mixture models. Journal of Computational and Graphical Statistics, 9:
+        249-265.
     """
 
     compatible_process_models = set([DP, MFM])
 
-    compatible_mixture_models = set([ConjugateGaussianMixture])
+    compatible_mixture_models = set([CollapsedConjugateGaussianMixture])
 
     def __init__(self, process_model, max_iter=1000, warmup=None):
 
@@ -101,11 +107,17 @@ class CollapsedRGMSSampler(GenericRGMSSampler):
         results of all iterations until this many iterations have elapsed.
         This must be non-negative and smaller than max_iter. Default is
         max_iter / 2
+
+    References
+    ----------
+    Jain, S. and Neal, R. M. (2004). A split-merge Markov chain Monte Carlo
+        procedure for the Dirichlet process mixture model. Journal of
+        Computational and Graphical Statistics, 13: 158-182.
     """
 
     compatible_process_models = set([DP, MFM])
 
-    compatible_mixture_models = set([ConjugateGaussianMixture])
+    compatible_mixture_models = set([CollapsedConjugateGaussianMixture])
 
     def __init__(self, process_model, scheme=None, max_iter=1000,
             warmup=None):
@@ -196,11 +208,17 @@ class CollapsedSAMSSampler(GenericSAMSSampler):
         results of all iterations until this many iterations have elapsed.
         This must be non-negative and smaller than max_iter. Default is
         max_iter / 2
+
+    References
+    ----------
+    Dahl, D. B. (2003). An Improved Merge-Split Sampler for Conjugate
+        Dirichlet Process Mixture Models. Technical Report 1086, University of
+        Wisconsin, Dept. of Statistics.
     """
 
     compatible_process_models = set([DP, MFM])
 
-    compatible_mixture_models = set([ConjugateGaussianMixture])
+    compatible_mixture_models = set([CollapsedConjugateGaussianMixture])
 
     def __init__(self, process_model, max_iter=1000, warmup=None):
 

@@ -1,4 +1,5 @@
 # -*- coding: utf-8 -*-
 
-from .mixtures import ConjugateGaussianMixture, NonconjugateGaussianMixture
+from .mixtures import (CollapsedConjugateGaussianMixture,
+        ConjugateGaussianMixture, NonconjugateGaussianMixture)
 from .processes import DP, MFM

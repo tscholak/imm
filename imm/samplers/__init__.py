@@ -3,4 +3,4 @@
 from .generic import GenericSampler
 from .collapsed import (CollapsedGibbsSampler, CollapsedRGMSSampler,
         CollapsedSAMSSampler)
-from .noncollapsed import GibbsSampler, RGMSSampler
+from .noncollapsed import GibbsSampler, RGMSSampler, SliceSampler

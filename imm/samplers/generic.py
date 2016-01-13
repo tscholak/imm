@@ -282,7 +282,7 @@ class GenericGibbsSampler(GenericSampler):
             # Make sure the proposed components are not contaminated with
             # obsolete information
             for k in (proposed_components - set([prev_k])):
-               mixture_params[k].iterate()
+                mixture_params[k].iterate()
 
             # Initialize and populate the total log probability accumulator
             log_dist = np.empty(len(n_c), dtype=float)
@@ -1169,3 +1169,183 @@ class GenericSAMSSampler(GenericMSSampler):
                 random_state)
 
         process_param.iterate(n, len(active_components))
+
+
+class GenericSliceSampler(GenericSampler):
+    """
+    Class which encapsulates common functionality between all slice samplers.
+    """
+
+    def __init__(self, process_model, max_iter=1000, warmup=None):
+
+        super(GenericSliceSampler, self).__init__(process_model,
+                max_iter=max_iter, warmup=warmup)
+
+    @staticmethod
+    def _slice_iterate(n, x_n, c_n, inv_c, n_c, active_components,
+            inactive_components, process_param, mixture_params, random_state):
+
+        # For each component `k`, sample component weights:
+        dalpha = np.zeros(len(n_c), dtype=float)
+        for k in active_components:
+            dalpha[k] = n_c[k]
+        new_k = inactive_components.pop()
+        proposed_components = set([new_k])
+        dalpha[new_k] = process_param.alpha
+        beta = random_state.dirichlet(dalpha)
+        mixture_params[new_k].iterate()
+        beta_star = beta[new_k]
+
+        # Sample slice variables and find the minimum
+        u = random_state.uniform(size=n)
+        for k in active_components:
+            for i in inv_c[k]:
+                u[i] *= beta[k]
+        u_star = min(u)
+
+        # Create new components through stick breaking until `beta_star` <
+        # `u_star`
+        while not beta_star < u_star:
+            new_k = inactive_components.pop()
+            proposed_components.add(new_k)
+            nu = random_state.beta(1.0, process_param.alpha)
+            beta[new_k] = beta_star * nu
+            mixture_params[new_k].iterate()
+            beta_star *= 1.0 - nu
+
+        active_components |= proposed_components
+
+        # For each observation `x_n[i]`, sample the component assignment
+        # `c_n[i]`
+        for i in range(n):
+
+            # Bookkeeping: Downdate
+            prev_k = c_n[i]
+            inv_c[prev_k].remove(i)
+            n_c[prev_k] -= 1
+            mixture_params[prev_k].downdate(x_n[i])
+
+            if n_c[prev_k] == 0:
+                proposed_components.add(prev_k)
+
+            # Initialize and populate the total log probability accumulator
+            log_dist = np.empty(len(n_c), dtype=float)
+            log_dist.fill(-np.inf)
+            for k in active_components:
+                if beta[k] > u[i]:
+                    log_dist[k] = mixture_params[k].log_likelihood(x_n[i])
+
+            # Sample from log_dist. Normalization is required
+            log_dist -= _logsumexp(len(n_c), log_dist)
+            # TODO: Can we expect performance improvements if we exclude those
+            #       elements of `log_dist` that are -inf?
+            next_k = random_state.choice(a=len(n_c), p=np.exp(log_dist))
+
+            # Bookkeeping: Update
+            c_n[i] = next_k
+            inv_c[next_k].add(i)
+            n_c[next_k] += 1
+            mixture_params[next_k].update(x_n[i])
+
+            proposed_components.discard(next_k)
+
+        # Cleanup
+        active_components -= proposed_components
+        inactive_components |= proposed_components
+
+    def _inference_step(self, n, x_n, c_n, inv_c, n_c, active_components,
+            inactive_components, process_param, mixture_params, random_state):
+
+        # For each active component `k`, sample component parameters
+        for k in active_components:
+            mixture_params[k].iterate()
+
+        self._slice_iterate(n, x_n, c_n, inv_c, n_c, active_components,
+                inactive_components, process_param, mixture_params,
+                random_state)
+
+        process_param.iterate(n, len(active_components))
+
+    def infer(self, x_n, c_n=None, max_iter=None, warmup=None,
+            random_state=None):
+        """
+        Component and latent variable inference.
+
+        Parameters
+        ----------
+        x_n : array-like
+            Examples
+        c_n : None or array-like, optional
+            Vector of component indicator variables. If None, then the
+            examples will be assigned to the same component initially
+        max_iter : None or int, optional
+            The maximum number of iterations
+        warmup: None or int, optional
+            The number of warm-up iterations
+        random_state : np.random.RandomState instance, optional
+            Used for drawing the random variates
+
+        Returns
+        -------
+        c_n : ndarray
+            Inferred component vectors
+        phi_c : ndarray
+            Inferred latent variables
+        """
+
+        max_iter = self._get_max_iter(max_iter)
+        warmup = self._get_warmup(warmup)
+
+        pm = self.process_model
+        random_state = pm._get_random_state(random_state)
+        process_param = pm.InferParam(pm, random_state)
+
+        # TODO: Move into mixture model?
+        n, x_n = self._check_examples(x_n)
+
+        c_n = self._check_components(n, c_n)
+
+        # Maximum number of components
+        c_max = n
+
+        # Inverse mapping from components to examples
+        # TODO: Only needed for split and merge samplers
+        inv_c = defaultdict(set)
+        for i in range(n):
+            inv_c[c_n[i]].add(i)
+
+        # Number of examples per component
+        n_c = np.bincount(c_n, minlength=c_max)
+
+        # active_components is an unordered set of unique components
+        active_components = set(np.unique(c_n))
+        # inactive_components is an unordered set of currently unassigned
+        # components
+        inactive_components = set(range(c_max)) - active_components
+
+        # Initialize model-dependent parameters lazily
+        mm = self.mixture_model
+        mixture_params = [mm.InferParam(mm, random_state)
+                for _ in range(c_max)]
+        for k in active_components:
+            mixture_params[k].iterate()
+            # TODO: Substitute for inv_c?
+            for i in inv_c[k]:
+                mixture_params[k].update(x_n[i])
+
+        c_n_samples = np.empty((max_iter-warmup)*n, dtype=int).reshape(
+                (max_iter-warmup,n))
+        phi_c_samples = [{} for _ in range(max_iter-warmup)]
+
+        for itn in range(max_iter):
+
+            self._inference_step(n, x_n, c_n, inv_c, n_c, active_components,
+                    inactive_components, process_param, mixture_params,
+                    random_state)
+
+            if not itn-warmup < 0:
+                c_n_samples[(itn-warmup,)] = c_n
+                for k in active_components:
+                    phi_c_samples[itn-warmup][k] = mixture_params[k].phi_c()
+
+        return c_n_samples, phi_c_samples

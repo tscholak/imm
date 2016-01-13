@@ -72,10 +72,10 @@ class GenericMixture(object):
             raise NotImplementedError
 
 
-class ConjugateGaussianMixture(GenericMixture):
+class CollapsedConjugateGaussianMixture(GenericMixture):
     """
-    Conjugate Gaussian mixture model. Parametrization according to
-    Görür and Rasmussen (2010), DOI 10.1007/s11390-010-1051-1.
+    Collapsed conjugate Gaussian mixture model. Parametrization according to
+    Görür and Rasmussen (2010).
 
     Parameters
     ----------
@@ -87,11 +87,17 @@ class ConjugateGaussianMixture(GenericMixture):
         beta hyperparameter. Must be larger than the dimension of xi minus one
     W : None or array-like, optional
         W hyperparameter
+
+    References
+    ----------
+    Görür, D. and Rasmussen, C. E. (2010). Dirichlet process Gaussian mixture
+        models: Choice of the base distribution. Journal of Computer Science
+        and Technology, 25(4): 615-626.
     """
 
     def __init__(self, xi=None, rho=1.0, beta=1.0, W=1.0):
 
-        super(ConjugateGaussianMixture, self).__init__()
+        super(CollapsedConjugateGaussianMixture, self).__init__()
 
         self.dim, self.xi, self.rho, self.beta, self.W = \
                 self._check_parameters(None, xi, rho, beta, W)
@@ -177,7 +183,7 @@ class ConjugateGaussianMixture(GenericMixture):
     def _check_mixture_model(cls, mixture_model):
 
         if not isinstance(mixture_model, cls):
-            raise ValueError("'mixture_model' must be a conjugate"
+            raise ValueError("'mixture_model' must be a collapsed conjugate"
                              " Gaussian mixture model."
                              " Got mixture_model = %r" % mixture_model)
 
@@ -210,47 +216,59 @@ class ConjugateGaussianMixture(GenericMixture):
 
         def __init__(self, mixture_model, random_state):
 
-            super(ConjugateGaussianMixture.DrawParam, self).__init__(
+            super(CollapsedConjugateGaussianMixture.DrawParam, self).__init__(
                     random_state)
 
             self._mixture_model = \
-                    ConjugateGaussianMixture._check_mixture_model(
+                    CollapsedConjugateGaussianMixture._check_mixture_model(
                             mixture_model)
 
             self._mu_c = None
             self._S_c = None
 
         @property
-        def S_c(self):
-
-            if self._S_c is None:
-                mm = self._mixture_model
-                S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
-                        self._random_state)
-                S_c_chol = _chol(mm.dim, S_c)
-                self._S_c = (S_c, S_c_chol)
-            return self._S_c
-
-        @property
         def mu_c(self):
 
             if self._mu_c is None:
+
                 mm = self._mixture_model
+
                 _, S_c_chol = self.S_c
+
                 self._mu_c = _normal_rvs(mm.dim, mm.xi,
                         np.sqrt(mm.rho)*S_c_chol, self._random_state)
+
             return self._mu_c
+
+        @property
+        def S_c(self):
+
+            if self._S_c is None:
+
+                mm = self._mixture_model
+
+                S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
+                        self._random_state)
+                S_c_chol = _chol(mm.dim, S_c)
+
+                self._S_c = (S_c, S_c_chol)
+
+            return self._S_c
 
         def draw_x_n(self):
 
             mm = self._mixture_model
+
             _, S_c_chol = self.S_c
-            ret = _normal_rvs(mm.dim, self.mu_c, S_c_chol, self._random_state)
-            return ret
+
+            x_n = _normal_rvs(mm.dim, self.mu_c, S_c_chol, self._random_state)
+
+            return x_n
 
         def phi_c(self):
 
             S_c, _ = self.S_c
+
             return {'mean': self.mu_c, 'precision': S_c}
 
         def dump(self):
@@ -261,11 +279,11 @@ class ConjugateGaussianMixture(GenericMixture):
 
         def __init__(self, mixture_model, random_state):
 
-            super(ConjugateGaussianMixture.InferParam, self).__init__(
-                    random_state)
+            super(CollapsedConjugateGaussianMixture.InferParam,
+                    self).__init__(random_state)
 
             self._mixture_model = \
-                    ConjugateGaussianMixture._check_mixture_model(
+                    CollapsedConjugateGaussianMixture._check_mixture_model(
                             mixture_model)
 
             self._rho_c = None
@@ -319,11 +337,14 @@ class ConjugateGaussianMixture(GenericMixture):
         def scale(self):
 
             if self._scale is None:
+
                 scale_chol = np.sqrt((self.rho_c+1.0) / \
                         (self.rho_c*self.df)) * self.beta_W_c_chol
                 scale_logdet = _chol_logdet(self._mixture_model.dim,
                         scale_chol)
+
                 self._scale = (scale_chol, scale_logdet)
+
             return self._scale
 
         def update(self, x):
@@ -432,10 +453,558 @@ class ConjugateGaussianMixture(GenericMixture):
                     self._beta_W_c_chol, self._df, self._scale
 
 
+class ConjugateGaussianMixture(GenericMixture):
+    """
+    Conjugate Gaussian mixture model. Parametrization according to
+    Görür and Rasmussen (2010).
+
+    Parameters
+    ----------
+    xi : None or array-like, optional
+        xi hyperparameter
+    rho : None or float, optional
+        rho hyperparameter
+    beta : None or float, optional
+        beta hyperparameter. Must be larger than the dimension of xi minus one
+    W : None or array-like, optional
+        W hyperparameter
+
+    References
+    ----------
+    Görür, D. and Rasmussen, C. E. (2010). Dirichlet process Gaussian mixture
+        models: Choice of the base distribution. Journal of Computer Science
+        and Technology, 25(4): 615-626.
+    """
+
+    def __init__(self, xi=None, rho=1.0, beta=1.0, W=1.0):
+
+        super(ConjugateGaussianMixture, self).__init__()
+
+        self.dim, self.xi, self.rho, self.beta, self.W = \
+                self._check_parameters(None, xi, rho, beta, W)
+        self._rho_xi = self.rho * self.xi
+        self._beta_W_chol = _chol(self.dim, self.beta*self.W)
+
+    @staticmethod
+    def _check_parameters(dim, xi, rho, beta, W):
+
+        # Try to infer dimensionality
+        if dim is None:
+            if xi is None:
+                if W is None:
+                    dim = 1
+                else:
+                    W = np.asarray(W, dtype=float)
+                    if W.ndim < 2:
+                        dim = 1
+                    else:
+                        dim = W.shape[0]
+            else:
+                xi = np.asarray(xi, dtype=float)
+                dim = xi.size
+        else:
+            if not np.isscalar(dim):
+                msg = ("Dimension of random variable must be a scalar.")
+                raise ValueError(msg)
+
+        # Check input sizes and return full arrays for xi and W if necessary
+        if xi is None:
+            xi = np.zeros(dim, dtype=float)
+        xi = np.asarray(xi, dtype=float)
+
+        if W is None:
+            W = 1.0
+        W = np.asarray(W, dtype=float)
+
+        if dim == 1:
+            xi.shape = (1,)
+            W.shape = (1, 1)
+
+        if xi.ndim != 1 or xi.shape[0] != dim:
+            msg = ("Array 'xi' must be a vector of length %d." % dim)
+            raise ValueError(msg)
+
+        if W.ndim == 0:
+            W = W * np.eye(dim)
+        elif W.ndim == 1:
+            W = np.diag(W)
+        elif W.ndim == 2 and W.shape != (dim, dim):
+            rows, cols = W.shape
+            if rows != cols:
+                msg = ("Array 'W' must be square if it is two-dimensional,"
+                       " but W.shape = %s." % str(W.shape))
+            else:
+                msg = ("Dimension mismatch: array 'W' is of shape %s,"
+                       " but 'xi' is a vector of length %d.")
+                msg = msg % (str(W.shape), len(xi))
+            raise ValueError(msg)
+        elif W.ndim > 2:
+            raise ValueError("Array 'W' must be at most two-dimensional,"
+                             " but W.ndim = %d" % W.ndim)
+
+        if rho is None:
+            rho = 1.0
+        elif not np.isscalar(rho):
+            raise ValueError("Float 'rho' must be a scalar.")
+        elif rho <= 0.0:
+            raise ValueError("Float 'rho' must be larger than zero, but"
+                             " rho = %f" % rho)
+
+        if beta is None:
+            beta = dim
+        elif not np.isscalar(beta):
+            raise ValueError("Float 'beta' must be a scalar.")
+        elif beta <= dim - 1:
+            raise ValueError("Float 'beta' must be larger than the dimension"
+                             " minus one, but beta = %f" % beta)
+
+        return dim, xi, rho, beta, W
+
+    @classmethod
+    def _check_mixture_model(cls, mixture_model):
+
+        if not isinstance(mixture_model, cls):
+            raise ValueError("'mixture_model' must be a conjugate"
+                             " Gaussian mixture model."
+                             " Got mixture_model = %r" % mixture_model)
+
+        return mixture_model
+
+    def _ms_log_prior(self, mixture_param):
+
+        ret = 0.0
+
+        _, S_c_chol, S_c_logdet = mixture_param.S_c
+
+        # TODO: Cache rho_S_c_chol and rho_S_c_logdet
+        rho_S_c_chol = np.sqrt(self.rho) * S_c_chol
+        rho_S_c_logdet = self.dim * np.log(self.rho) + S_c_logdet
+        ret += _normal_logpdf(mixture_param.mu_c, self.dim, self.xi,
+                rho_S_c_chol, rho_S_c_logdet)
+
+        # TODO: Cache beta_W_logdet
+        beta_W_logdet = _chol_logdet(self.dim, self._beta_W_chol)
+        ret += _wishart_logpdf(S_c_chol, S_c_logdet, self.dim, self.beta,
+                self._beta_W_chol, beta_W_logdet)
+
+        return ret
+
+    def _ms_log_likelihood(self, x_n, inv_c, mixture_param, random_state):
+        """
+        Logarithm of the likelihood appearing in the M-H acceptance ratio used
+        by the merge-split samplers.
+        """
+
+        ret = 0.0
+
+        for _, l in enumerate(inv_c):
+            ret += mixture_param.log_likelihood(x_n[l])
+
+        return ret
+
+    class DrawParam(GenericMixture.DrawParam):
+
+        def __init__(self, mixture_model, random_state):
+
+            super(ConjugateGaussianMixture.DrawParam, self).__init__(
+                    random_state)
+
+            self._mixture_model = \
+                    ConjugateGaussianMixture._check_mixture_model(
+                            mixture_model)
+
+            self._mu_c = None
+            self._S_c = None
+
+        @property
+        def mu_c(self):
+
+            if self._mu_c is None:
+
+                mm = self._mixture_model
+
+                _, S_c_chol = self.S_c
+
+                self._mu_c = _normal_rvs(mm.dim, mm.xi,
+                        np.sqrt(mm.rho)*S_c_chol, self._random_state)
+
+            return self._mu_c
+
+        @property
+        def S_c(self):
+
+            if self._S_c is None:
+
+                mm = self._mixture_model
+
+                S_c = _wishart_rvs(mm.dim, mm.beta, mm._beta_W_chol,
+                        self._random_state)
+                S_c_chol = _chol(mm.dim, S_c)
+
+                self._S_c = (S_c, S_c_chol)
+
+            return self._S_c
+
+        def draw_x_n(self):
+
+            mm = self._mixture_model
+
+            _, S_c_chol = self.S_c
+
+            x_n = _normal_rvs(mm.dim, self.mu_c, S_c_chol, self._random_state)
+
+            return x_n
+
+        def phi_c(self):
+
+            S_c, _ = self.S_c
+
+            return {'mean': self.mu_c, 'precision': S_c}
+
+        def dump(self):
+
+            return self._mu_c, self._S_c
+
+    class InferParam(GenericMixture.InferParam):
+
+        def __init__(self, mixture_model, random_state):
+
+            super(ConjugateGaussianMixture.InferParam, self).__init__(
+                    random_state)
+
+            self._mixture_model = \
+                    ConjugateGaussianMixture._check_mixture_model(
+                            mixture_model)
+
+            self._n_c = None
+            self._rho_c = None
+            self._beta_c = None
+            self._xsum_c = None
+            self._xi_c = None
+            self._beta_W_help_c_chol = None
+
+            self._mu_c = None
+            self._S_c = None
+
+        @property
+        def n_c(self):
+
+            if self._n_c is None:
+                return 0
+            else:
+                return self._n_c
+
+        @property
+        def rho_c(self):
+
+            if self._rho_c is None:
+                return self._mixture_model.rho
+            else:
+                return self._rho_c
+
+        @property
+        def beta_c(self):
+
+            if self._beta_c is None:
+                return self._mixture_model.beta
+            else:
+                return self._beta_c
+
+        @property
+        def xsum_c(self):
+
+            if self._xsum_c is None:
+                return np.zeros(self._mixture_model.dim, dtype=float)
+            else:
+                return self._xsum_c
+
+        @property
+        def xi_c(self):
+
+            if self._xi_c is None:
+                return self._mixture_model.xi
+            else:
+                return self._xi_c
+
+        @property
+        def beta_W_help_c_chol(self):
+
+            if self._beta_W_help_c_chol is None:
+                return self._mixture_model._beta_W_chol
+            else:
+                return self._beta_W_help_c_chol
+
+        @property
+        def mu_c(self):
+
+            if self._mu_c is None:
+
+                mm = self._mixture_model
+
+                # We need to draw `S_c` first, hence `self.S_c` instead of
+                # `self._S_c`
+                self._mu_c, _ = self._draw_mu_c(mm.dim, self.rho_c, self.S_c,
+                        self.xi_c, self._random_state)
+
+            return self._mu_c
+
+        @staticmethod
+        def _prepare_mu_c(dim, rho_c, S_c):
+
+            # That is why we have to draw `S_c` first
+            if S_c is None:
+                raise ValueError
+            _, S_c_chol, S_c_logdet = S_c
+            rho_S_c_chol = np.sqrt(rho_c) * S_c_chol
+            rho_S_c_logdet = dim * np.log(rho_c) + S_c_logdet
+
+            return rho_S_c_chol, rho_S_c_logdet
+
+        @staticmethod
+        def _log_likelihood_mu_c(dim, rho_S_c_chol, rho_S_c_logdet, xi_c,
+                mu_c):
+
+            ret = _normal_logpdf(mu_c, dim, xi_c, rho_S_c_chol,
+                    rho_S_c_logdet)
+
+            return ret
+
+        @classmethod
+        def _draw_mu_c(cls, dim, rho_c, S_c, xi_c, random_state,
+                compute_log_likelihood=False):
+
+            # Note that `rho_S_c_logdet` is computed as well although it is
+            # used only when `compute_log_likelihood` is `True`. It is much
+            # more efficient to compute it from `S_c_logdet` than from
+            # `rho_S_c_chol`
+            rho_S_c_chol, rho_S_c_logdet = cls._prepare_mu_c(dim, rho_c, S_c)
+
+            mu_c = _normal_rvs(dim, xi_c, rho_S_c_chol, random_state)
+
+            log_likelihood = 0.0
+            if compute_log_likelihood:
+                log_likelihood += cls._log_likelihood_mu_c(dim, rho_S_c_chol,
+                        rho_S_c_logdet, xi_c, mu_c)
+
+            return mu_c, log_likelihood
+
+        @property
+        def S_c(self):
+
+            if self._S_c is None:
+
+                mm = self._mixture_model
+
+                self._S_c, _ = self._draw_S_c(mm.dim, self.n_c,
+                        self.beta_W_help_c_chol, self.xsum_c, self._mu_c,
+                        self.beta_c, self._random_state)
+
+            return self._S_c
+
+        @staticmethod
+        def _prepare_S_c(dim, n_c, beta_W_help_c_chol, xsum_c, mu_c):
+
+            if n_c > 0:
+                if mu_c is None:
+                    raise ValueError
+                beta_W_c_chol = np.array(beta_W_help_c_chol, copy=True)
+                _chol_update(dim, beta_W_c_chol,
+                        np.sqrt(n_c) * (xsum_c/n_c - mu_c))
+            else:
+                beta_W_c_chol = beta_W_help_c_chol
+
+            return beta_W_c_chol
+
+        @staticmethod
+        def _log_likelihood_S_c(dim, beta_c, beta_W_c_chol, S_c_chol,
+                S_c_logdet):
+
+            beta_W_c_logdet = _chol_logdet(dim, beta_W_c_chol)
+            ret = _wishart_logpdf(S_c_chol, S_c_logdet, dim, beta_c,
+                    beta_W_c_chol, beta_W_c_logdet)
+
+            return ret
+
+        @classmethod
+        def _draw_S_c(cls, dim, n_c, beta_W_help_c_chol, xsum_c, mu_c, beta_c,
+                random_state, compute_log_likelihood=False):
+
+            beta_W_c_chol = cls._prepare_S_c(dim, n_c, beta_W_help_c_chol,
+                    xsum_c, mu_c)
+
+            S_c = _wishart_rvs(dim, beta_c, beta_W_c_chol, random_state)
+            S_c_chol = _chol(dim, S_c)
+            S_c_logdet = _chol_logdet(dim, S_c_chol)
+
+            log_likelihood = 0.0
+            if compute_log_likelihood:
+                log_likelihood += cls._log_likelihood_S_c(dim, beta_c,
+                        beta_W_c_chol, S_c_chol, S_c_logdet)
+
+            return (S_c, S_c_chol, S_c_logdet), log_likelihood
+
+        def update(self, x):
+
+            mm = self._mixture_model
+
+            if self._beta_W_help_c_chol is None:
+                self._beta_W_help_c_chol = np.array(mm._beta_W_chol,
+                        copy=True)
+            else:
+                _chol_update(mm.dim, self._beta_W_help_c_chol,
+                        np.sqrt(self._n_c / float(self._n_c+1)) * \
+                                (x - self._xsum_c/self._n_c))
+
+            if self._n_c is None:
+                self._n_c = 1
+            else:
+                self._n_c += 1
+
+            if self._rho_c is None:
+                self._rho_c = mm.rho + 1.0
+            else:
+                self._rho_c += 1.0
+
+            if self._beta_c is None:
+                self._beta_c = mm.beta + 1.0
+            else:
+                self._beta_c += 1.0
+
+            if self._xsum_c is None:
+                self._xsum_c = np.array(x, copy=True)
+            else:
+                self._xsum_c += x
+
+            self._xi_c = (mm._rho_xi + self._xsum_c) / self._rho_c
+
+            return self
+
+        def downdate(self, x):
+
+            mm = self._mixture_model
+
+            if self._beta_W_help_c_chol is None:
+                raise ValueError('beta_W_help_c must be updated before it can'
+                                 ' be downdated')
+            elif self._n_c > 1:
+                _chol_downdate(mm.dim, self._beta_W_help_c_chol,
+                        np.sqrt(self._n_c / float(self._n_c-1)) * \
+                                (x - self._xsum_c/self._n_c))
+            else:
+                self._beta_W_help_c_chol = None
+
+            if self._n_c is None:
+                raise ValueError('n_c must be updated before it can be'
+                                 ' downdated')
+            elif self._n_c > 1:
+                self._n_c -= 1
+            else:
+                self._n_c = None
+
+            if self._rho_c is None:
+                raise ValueError('rho_c must be updated before it can be'
+                                 ' downdated')
+            elif self._n_c is not None:
+                self._rho_c -= 1.0
+            else:
+                self._rho_c = None
+
+            if self._beta_c is None:
+                raise ValueError('beta_c must be updated before it can be'
+                                 ' downdated')
+            elif self._n_c is not None:
+                self._beta_c -= 1.0
+            else:
+                self._beta_c = None
+
+            if self._xsum_c is None:
+                raise ValueError('xsum_c must be updated before it can be'
+                                 ' downdated')
+            elif self._n_c is not None:
+                self._xsum_c -= x
+            else:
+                self._xsum_c = None
+
+            if self._n_c is not None:
+                self._xi_c = (mm._rho_xi + self._xsum_c) / self._rho_c
+            else:
+                self._xi_c = None
+
+            return self
+
+        def iterate(self, compute_log_likelihood=False):
+
+            mm = self._mixture_model
+
+            dim = mm.dim
+
+            # We have to sample `S_c` first
+            self._S_c, log_likelihood_S_c = self._draw_S_c(dim, self.n_c,
+                    self.beta_W_help_c_chol, self.xsum_c, self._mu_c,
+                    self.beta_c, self._random_state, compute_log_likelihood)
+
+            self._mu_c, log_likelihood_mu_c = self._draw_mu_c(dim, self.rho_c,
+                    self._S_c, self.xi_c, self._random_state,
+                    compute_log_likelihood)
+
+            return log_likelihood_mu_c + log_likelihood_S_c
+
+        def iterate_to(self, mixture_param, compute_log_likelihood=False):
+
+            mm = self._mixture_model
+
+            dim = mm.dim
+
+            log_likelihood = 0.0
+
+            # We have to do `S_c` first
+            self._S_c = mixture_param._S_c
+
+            if compute_log_likelihood:
+                _, S_c_chol, S_c_logdet = self._S_c
+                beta_W_c_chol = self._prepare_S_c(dim, self.n_c,
+                        self.beta_W_help_c_chol, self.xsum_c, self._mu_c)
+                log_likelihood += self._log_likelihood_S_c(dim, self.beta_c,
+                        beta_W_c_chol, S_c_chol, S_c_logdet)
+
+            self._mu_c = mixture_param._mu_c
+
+            if compute_log_likelihood:
+                rho_S_c_chol, rho_S_c_logdet = self._prepare_mu_c(dim,
+                        self.rho_c, self._S_c)
+                log_likelihood += self._log_likelihood_mu_c(dim, rho_S_c_chol,
+                        rho_S_c_logdet, xi_c, self._mu_c)
+
+            return log_likelihood
+
+        def log_likelihood(self, x):
+
+            # We have to do `S_c` first
+            _, S_c_chol, S_c_logdet = self.S_c
+
+            ret = _normal_logpdf(x, self._mixture_model.dim, self.mu_c,
+                    S_c_chol, S_c_logdet)
+
+            return ret
+
+        def phi_c(self):
+
+            # We have to do `S_c` first
+            S_c, _, _ = self.S_c
+
+            return {'mean': self.mu_c, 'precision': S_c}
+
+        def dump(self):
+
+            return self._n_c, self._R_c_chol, self._beta_c, self._xsum_c, \
+                    self._xi_c, self._beta_W_help_c_chol, self._mu_c, \
+                    self._S_c
+
+
 class NonconjugateGaussianMixture(GenericMixture):
     """
     Conditionally conjugate Gaussian mixture model. Parametrization according
-    to Görür and Rasmussen (2010), DOI 10.1007/s11390-010-1051-1.
+    to Görür and Rasmussen (2010).
 
     Parameters
     ----------
@@ -447,6 +1016,12 @@ class NonconjugateGaussianMixture(GenericMixture):
         beta hyperparameter
     W : None or array-like, optional
         W hyperparameter
+
+    References
+    ----------
+    Görür, D. and Rasmussen, C. E. (2010). Dirichlet process Gaussian mixture
+        models: Choice of the base distribution. Journal of Computer Science
+        and Technology, 25(4): 615-626.
     """
 
     def __init__(self, xi=None, R=1.0, beta=1.0, W=1.0):
@@ -674,8 +1249,6 @@ class NonconjugateGaussianMixture(GenericMixture):
 
             self._mu_c = None
             self._S_c = None
-
-            # self.iterate()
 
         @property
         def n_c(self):
