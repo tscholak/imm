@@ -1196,12 +1196,21 @@ class GenericSliceSampler(GenericSampler):
         mixture_params[new_k].iterate()
         beta_star = beta[new_k]
 
-        # Sample slice variables and find the minimum
-        u = random_state.uniform(size=n)
+        # Generate a sample of `u_star`, the minimum of the slice variables
+        k_star = None
         for k in active_components:
-            for i in inv_c[k]:
-                u[i] *= beta[k]
-        u_star = min(u)
+            u_c_star = beta[k] * random_state.beta(1.0, n_c[k])
+            if k_star:
+                if u_c_star < u_star:
+                    k_star = k
+                    u_star = u_c_star
+            else:
+                k_star = k
+                u_star = u_c_star
+
+        # Sample the index `i_star` of the slice variable that achieves
+        # `u_star`
+        i_star = random_state.choice(a=list(inv_c[k_star]))
 
         # Create new components through stick breaking until `beta_star` <
         # `u_star`
@@ -1228,11 +1237,21 @@ class GenericSliceSampler(GenericSampler):
             if n_c[prev_k] == 0:
                 proposed_components.add(prev_k)
 
+            # Sample slice variable
+            if i == i_star:
+                u = u_star
+            else:
+                u = random_state.uniform(low=u_star, high=beta[prev_k])
+
             # Initialize and populate the total log probability accumulator
             log_dist = np.empty(len(n_c), dtype=float)
             log_dist.fill(-np.inf)
+            # TODO: Performance improvement possible by reordering the
+            #       clusters according to `beta[k]`
             for k in active_components:
-                if beta[k] > u[i]:
+                # Data items can only join clusters for which `beta[k]` is
+                # larger than the respective slice variable
+                if beta[k] > u:
                     log_dist[k] = mixture_params[k].log_likelihood(x_n[i])
 
             # Sample from log_dist. Normalization is required
