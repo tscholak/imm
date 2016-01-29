@@ -1,6 +1,8 @@
 imm
 ===
 
+[![Join the chat at https://gitter.im/tscholak/imm](https://badges.gitter.im/tscholak/imm.svg)](https://gitter.im/tscholak/imm?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge)
+
 imm is a Python package for Bayesian MCMC inference in infinite mixture
 models. It is partially implemented in Cython for speed.
 
